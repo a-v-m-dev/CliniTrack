@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
-// initialize PouchDB database (same DB name used by LoginForm)
+// Initialize PouchDB database
 const db = new PouchDB('CliniTrack');
 
 interface RegisterFormProps {
@@ -41,7 +41,7 @@ export function RegisterForm({ onBackToLogin }: RegisterFormProps) {
       return;
     }
 
-    // basic email validation
+    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
       setError('Please enter a valid email address');
@@ -59,42 +59,55 @@ export function RegisterForm({ onBackToLogin }: RegisterFormProps) {
     }
 
     try {
-      // Step 1: Ensure local DB does not already have this user
+      // Step 1: Check if user already exists locally
+      try {
+        const existingUser = await db.get(formData.email);
+        if (existingUser) {
+          setError('Email already exists locally.');
+          return;
+        }
+      } catch (err: any) {
+        // User doesn't exist locally (which is what we want)
+        if (err.name !== 'not_found') {
+          console.warn('Error checking local user:', err);
+        }
+      }
 
-      // Step 2: Try remote registration via useAuth (keeps existing behavior)
+      // Step 2: Try remote registration via useAuth
       const remoteSuccess = await register(formData.email, formData.password, formData.name, formData.role);
 
       if (!remoteSuccess) {
-        setError('Registration failed. Email may already be in use.');
-        return;
+        // Even if remote fails, we can save locally for offline use
+        console.log('Remote registration failed, saving locally for offline use...');
       }
 
-      // Step 3: Save locally to PouchDB for offline/login usage
+      // Step 3: Save locally to PouchDB for offline usage
       const userDoc = {
-        _id: formData.email,            // use email as document id
-        type: 'user' as const,          // mark type so LoginForm can filter
+        _id: `user_${formData.email}`,    // Prefix with 'user_' to avoid conflicts
+        type: 'user' as const,
         name: formData.name,
         email: formData.email,
-        password: formData.password,    // WARNING: plain text for demo only
+        password: formData.password,      // Note: In production, hash this password
         role: formData.role,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        synced: remoteSuccess // Track if this user is synced with remote
       };
 
       try {
         await db.put(userDoc);
         console.log('✅ User saved locally to PouchDB:', formData.email);
       } catch (putErr: any) {
-        // handle conflict if doc exists between the earlier check and this put
         if (putErr?.name === 'conflict') {
           setError('Email already exists locally.');
           return;
         } else {
-          console.warn('Failed to save user locally — continuing:', putErr);
-          // we don't block success if local save fails for non-conflict reasons
+          console.error('Failed to save user locally:', putErr);
+          setError('Failed to create local account. Please try again.');
+          return;
         }
       }
 
-      // All good -> show success and navigate back to login after a moment
+      // All good -> show success and navigate back to login
       setSuccess(true);
       setTimeout(() => {
         onBackToLogin();

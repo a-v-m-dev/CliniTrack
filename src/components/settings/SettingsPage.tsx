@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import PouchDB from 'pouchdb-browser';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -10,17 +11,46 @@ import { Separator } from '../ui/separator';
 import { User, Key, Bell, Loader2, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
+// Initialize PouchDB
+const db = new PouchDB('CliniTrack');
+
+// Define User interface
+interface UserDoc {
+  _id: string;
+  type: 'user';
+  name: string;
+  email: string;
+  password: string;
+  role: 'secretary' | 'doctor';
+  createdAt: string;
+  updatedAt?: string;
+  notifications?: {
+    followUpReminders: boolean;
+    highRiskAlerts: boolean;
+    newPatientRegistrations: boolean;
+    labResultsAvailable: boolean;
+    systemMaintenance: boolean;
+  };
+}
 
 export function SettingsPage() {
-  const { user, updateProfile, changePassword } = useAuth();
+  const { user: authUser, updateProfile, changePassword } = useAuth();
+  const [currentUser, setCurrentUser] = useState<UserDoc | null>(null);
   const [profileData, setProfileData] = useState({
-    name: user?.name || '',
-    email: user?.email || ''
+    name: '',
+    email: ''
   });
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
+  });
+  const [notificationSettings, setNotificationSettings] = useState({
+    followUpReminders: true,
+    highRiskAlerts: true,
+    newPatientRegistrations: false,
+    labResultsAvailable: false,
+    systemMaintenance: true
   });
   const [showPasswords, setShowPasswords] = useState({
     current: false,
@@ -29,18 +59,54 @@ export function SettingsPage() {
   });
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const [messages, setMessages] = useState({
     profile: '',
-    password: ''
+    password: '',
+    notifications: ''
   });
   const [errors, setErrors] = useState({
     profile: '',
-    password: ''
+    password: '',
+    notifications: ''
   });
 
+  // Fetch current user data from PouchDB
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      if (!authUser?.email) return;
+
+      try {
+        const userDocId = `user_${authUser.email}`;
+        // Remove the type argument and use type assertion instead
+        const userDoc = await db.get(userDocId) as UserDoc;
+        setCurrentUser(userDoc);
+        setProfileData({
+          name: userDoc.name,
+          email: userDoc.email
+        });
+        setNotificationSettings(userDoc.notifications || {
+          followUpReminders: true,
+          highRiskAlerts: true,
+          newPatientRegistrations: userDoc.role === 'doctor',
+          labResultsAvailable: userDoc.role === 'doctor',
+          systemMaintenance: true
+        });
+      } catch (err: any) {
+        if (err.name === 'not_found') {
+          console.warn('Current user not found in PouchDB');
+        } else {
+          console.error('Failed to fetch current user:', err);
+        }
+      }
+    };
+
+    fetchCurrentUser();
+  }, [authUser?.email]);
+
   const clearMessages = () => {
-    setMessages({ profile: '', password: '' });
-    setErrors({ profile: '', password: '' });
+    setMessages({ profile: '', password: '', notifications: '' });
+    setErrors({ profile: '', password: '', notifications: '' });
   };
 
   const handleProfileUpdate = async (e: React.FormEvent) => {
@@ -55,10 +121,27 @@ export function SettingsPage() {
     }
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!currentUser) {
+        throw new Error('User not found');
+      }
+
+      // Update in PouchDB
+      const updatedUser: UserDoc = {
+        ...currentUser,
+        name: profileData.name,
+        email: profileData.email,
+        updatedAt: new Date().toISOString()
+      };
+
+      await db.put(updatedUser);
+      setCurrentUser(updatedUser);
+
+      // Update in AuthContext
       updateProfile(profileData);
+
       setMessages(prev => ({ ...prev, profile: 'Profile updated successfully' }));
     } catch (err) {
+      console.error('Failed to update profile:', err);
       setErrors(prev => ({ ...prev, profile: 'Failed to update profile' }));
     } finally {
       setIsUpdatingProfile(false);
@@ -89,25 +172,93 @@ export function SettingsPage() {
     }
 
     try {
+      if (!currentUser) {
+        throw new Error('User not found');
+      }
+
+      // Verify current password
+      if (passwordData.currentPassword !== currentUser.password) {
+        setErrors(prev => ({ ...prev, password: 'Current password is incorrect' }));
+        setIsChangingPassword(false);
+        return;
+      }
+
+      // Update password in PouchDB
+      const updatedUser: UserDoc = {
+        ...currentUser,
+        password: passwordData.newPassword,
+        updatedAt: new Date().toISOString()
+      };
+
+      await db.put(updatedUser);
+      setCurrentUser(updatedUser);
+
+      // Update in AuthContext
       const success = await changePassword(passwordData.currentPassword, passwordData.newPassword);
+      
       if (success) {
         setMessages(prev => ({ ...prev, password: 'Password changed successfully' }));
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       } else {
-        setErrors(prev => ({ ...prev, password: 'Current password is incorrect' }));
+        setErrors(prev => ({ ...prev, password: 'Failed to change password' }));
       }
     } catch (err) {
+      console.error('Failed to change password:', err);
       setErrors(prev => ({ ...prev, password: 'Failed to change password' }));
     } finally {
       setIsChangingPassword(false);
     }
   };
 
+  const handleNotificationSave = async () => {
+    clearMessages();
+    setIsSavingNotifications(true);
 
+    try {
+      if (!currentUser) {
+        throw new Error('User not found');
+      }
+
+      // Update notifications in PouchDB
+      const updatedUser: UserDoc = {
+        ...currentUser,
+        notifications: notificationSettings,
+        updatedAt: new Date().toISOString()
+      };
+
+      await db.put(updatedUser);
+      setCurrentUser(updatedUser);
+
+      setMessages(prev => ({ ...prev, notifications: 'Notification preferences saved successfully' }));
+    } catch (err) {
+      console.error('Failed to save notifications:', err);
+      setErrors(prev => ({ ...prev, notifications: 'Failed to save notification preferences' }));
+    } finally {
+      setIsSavingNotifications(false);
+    }
+  };
 
   const togglePasswordVisibility = (field: keyof typeof showPasswords) => {
     setShowPasswords(prev => ({ ...prev, [field]: !prev[field] }));
   };
+
+  const handleNotificationToggle = (setting: keyof typeof notificationSettings) => {
+    setNotificationSettings(prev => ({
+      ...prev,
+      [setting]: !prev[setting]
+    }));
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -162,10 +313,23 @@ export function SettingsPage() {
                 <div className="space-y-2">
                   <Label>Role</Label>
                   <div className="p-3 bg-muted rounded-md">
-                    <span className="capitalize font-medium">{user?.role}</span>
+                    <span className="capitalize font-medium">{currentUser.role}</span>
                     <p className="text-sm text-muted-foreground mt-1">
                       Your role determines your access permissions within CliniTrack
                     </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Account Created</Label>
+                  <div className="p-3 bg-muted rounded-md">
+                    <span className="font-medium">
+                      {new Date(currentUser.createdAt).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </span>
                   </div>
                 </div>
 
@@ -219,6 +383,7 @@ export function SettingsPage() {
                       value={passwordData.currentPassword}
                       onChange={(e) => setPasswordData(prev => ({ ...prev, currentPassword: e.target.value }))}
                       disabled={isChangingPassword}
+                      placeholder="Enter your current password"
                     />
                     <Button
                       type="button"
@@ -241,6 +406,7 @@ export function SettingsPage() {
                       value={passwordData.newPassword}
                       onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
                       disabled={isChangingPassword}
+                      placeholder="Enter your new password"
                     />
                     <Button
                       type="button"
@@ -263,6 +429,7 @@ export function SettingsPage() {
                       value={passwordData.confirmPassword}
                       onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
                       disabled={isChangingPassword}
+                      placeholder="Confirm your new password"
                     />
                     <Button
                       type="button"
@@ -324,7 +491,10 @@ export function SettingsPage() {
                       Get notified when patient follow-ups are due
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch 
+                    checked={notificationSettings.followUpReminders}
+                    onCheckedChange={() => handleNotificationToggle('followUpReminders')}
+                  />
                 </div>
 
                 <Separator />
@@ -336,7 +506,10 @@ export function SettingsPage() {
                       Immediate notifications for high-risk patients
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch 
+                    checked={notificationSettings.highRiskAlerts}
+                    onCheckedChange={() => handleNotificationToggle('highRiskAlerts')}
+                  />
                 </div>
 
                 <Separator />
@@ -348,7 +521,10 @@ export function SettingsPage() {
                       Notifications when new patients are registered
                     </p>
                   </div>
-                  <Switch defaultChecked={user?.role === 'doctor'} />
+                  <Switch 
+                    checked={notificationSettings.newPatientRegistrations}
+                    onCheckedChange={() => handleNotificationToggle('newPatientRegistrations')}
+                  />
                 </div>
 
                 <Separator />
@@ -360,7 +536,10 @@ export function SettingsPage() {
                       Get notified when new lab results are uploaded
                     </p>
                   </div>
-                  <Switch defaultChecked={user?.role === 'doctor'} />
+                  <Switch 
+                    checked={notificationSettings.labResultsAvailable}
+                    onCheckedChange={() => handleNotificationToggle('labResultsAvailable')}
+                  />
                 </div>
 
                 <Separator />
@@ -372,12 +551,40 @@ export function SettingsPage() {
                       Updates about system maintenance and downtime
                     </p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch 
+                    checked={notificationSettings.systemMaintenance}
+                    onCheckedChange={() => handleNotificationToggle('systemMaintenance')}
+                  />
                 </div>
               </div>
 
+              {messages.notifications && (
+                <Alert>
+                  <CheckCircle className="h-4 w-4" />
+                  <AlertDescription>{messages.notifications}</AlertDescription>
+                </Alert>
+              )}
+
+              {errors.notifications && (
+                <Alert variant="destructive">
+                  <AlertDescription>{errors.notifications}</AlertDescription>
+                </Alert>
+              )}
+
               <div className="pt-4">
-                <Button>Save Notification Preferences</Button>
+                <Button 
+                  onClick={handleNotificationSave}
+                  disabled={isSavingNotifications}
+                >
+                  {isSavingNotifications ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Notification Preferences'
+                  )}
+                </Button>
               </div>
             </CardContent>
           </Card>

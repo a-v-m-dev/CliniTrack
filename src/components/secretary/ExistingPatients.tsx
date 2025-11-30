@@ -6,20 +6,31 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { Search, User, Phone, Mail, Calendar, Edit, Upload, FileText } from 'lucide-react';
+import { Search, User as UserIcon, Phone, Mail, Calendar, Edit, Upload, FileText } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Separator } from '../ui/separator';
+import { useAuth } from '../../contexts/AuthContext';
+
+// Define User interface locally since it's not exported from types
+interface User {
+  _id: string;
+  type: 'user';
+  name: string;
+  email: string;
+  role: 'secretary' | 'doctor';
+  createdAt: string;
+}
 
 interface ExistingPatientsProps {
+  patients: Patient[]; // Add this line - accept patients as prop
   labResults: LabResult[];
   onPatientUpdate: (patient: Patient) => void;
   onLabResultAdd: (result: LabResult) => void;
 }
 
-export function ExistingPatients({ labResults, onPatientUpdate, onLabResultAdd }: ExistingPatientsProps) {
-  const [patients, setPatients] = useState<Patient[]>([]);
+export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabResultAdd }: ExistingPatientsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -31,45 +42,44 @@ export function ExistingPatients({ labResults, onPatientUpdate, onLabResultAdd }
     file: null as File | null
   });
   const [showLabUpload, setShowLabUpload] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
+  const { user: authUser } = useAuth();
   const db = new PouchDB('CliniTrack');
 
-// Fetch all patients from PouchDB
-// Fetch all patients from PouchDB
+  // Fetch current user from PouchDB
   useEffect(() => {
-    const fetchPatients = async () => {
+    const fetchCurrentUser = async () => {
+      if (!authUser?.email) return;
+
       try {
-        const result = await db.allDocs({ include_docs: true });
-
-        // Cast to any so we can describe the shape we expect
-        const rows = (result as any).rows as Array<{ id: string; doc?: any }>;
-
-        // Keep only rows that have a doc, exclude user docs, and ensure doc looks like a Patient
-        const filteredPatients: Patient[] = rows
-          .filter(r => !!r.doc && !String(r.id).startsWith('clinitrack_user')) // remove user docs
-          .map(r => r.doc)
-          .filter(
-            (doc): doc is Patient =>
-              !!doc &&
-              typeof doc.id === 'string' &&
-              typeof doc.name === 'string' &&
-              typeof doc.createdAt === 'string'
-          );
-
-        setPatients(filteredPatients);
-        console.log('✅ Loaded patients from PouchDB:', filteredPatients);
-      } catch (err) {
-        console.error('Failed to fetch patients from PouchDB:', err);
+        const userDocId = `user_${authUser.email}`;
+        const userDoc = await db.get(userDocId) as User;
+        setCurrentUser(userDoc);
+      } catch (err: any) {
+        if (err.name === 'not_found') {
+          console.warn('Current user not found in PouchDB');
+        } else {
+          console.error('Failed to fetch current user:', err);
+        }
       }
     };
 
-    fetchPatients();
-  }, [db]);
+    fetchCurrentUser();
+  }, [authUser?.email]);
+
+  // REMOVE the useEffect that fetches patients since we're getting them as props now
+  // useEffect(() => {
+  //   const fetchPatients = async () => {
+  //     // ... existing patient fetching code
+  //   };
+  //   fetchPatients();
+  // }, []);
 
   const filteredPatients = patients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.phone.includes(searchTerm)
+    patient.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    patient.phone?.includes(searchTerm)
   );
 
   const getPatientLabResults = (patientId: string) => {
@@ -93,7 +103,7 @@ export function ExistingPatients({ labResults, onPatientUpdate, onLabResultAdd }
       try {
         const existingDoc = await db.get(selectedPatient.id);
         await db.put({ ...existingDoc, ...updatedPatient });
-        setPatients(prev => prev.map(p => p.id === updatedPatient.id ? updatedPatient : p));
+        onPatientUpdate(updatedPatient); // Use the callback to update parent state
         setSelectedPatient(updatedPatient);
         setIsEditing(false);
       } catch (err) {
@@ -102,52 +112,71 @@ export function ExistingPatients({ labResults, onPatientUpdate, onLabResultAdd }
     }
   };
 
-const handleLabUpload = (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!selectedPatient || !newLabResult.type || !newLabResult.name || !newLabResult.results) return;
+  const handleLabUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPatient || !newLabResult.type || !newLabResult.name || !newLabResult.results) return;
 
-  const labResult: LabResult = {
-    id: Math.random().toString(36).substr(2, 9),
-    patientId: selectedPatient.id,
-    type: newLabResult.type as any,
-    name: newLabResult.name,
-    date: new Date().toISOString(),
-    results: newLabResult.results,
-    file: newLabResult.file
-      ? {
-          name: newLabResult.file.name,
-          url: URL.createObjectURL(newLabResult.file),
-          type: newLabResult.file.type
-        }
-      : undefined,
-    uploadedBy: 'Mary Adams'
+    const labResult: LabResult = {
+      id: `lab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      patientId: selectedPatient.id,
+      type: newLabResult.type as any,
+      name: newLabResult.name,
+      date: new Date().toISOString(),
+      results: newLabResult.results,
+      file: newLabResult.file
+        ? {
+            name: newLabResult.file.name,
+            url: URL.createObjectURL(newLabResult.file),
+            type: newLabResult.file.type
+          }
+        : undefined,
+      uploadedBy: currentUser?.name || authUser?.name || 'System User'
+    };
+
+    // Save to PouchDB
+    try {
+      await db.put({
+        _id: labResult.id,
+        ...labResult
+      });
+      console.log('✅ Lab result saved to PouchDB:', labResult.id);
+    } catch (err) {
+      console.error('Failed to save lab result to PouchDB:', err);
+    }
+
+    // Use parent callback to update lab results
+    onLabResultAdd(labResult);
+    setNewLabResult({ type: '', name: '', results: '', file: null });
+    setShowLabUpload(false);
   };
 
-  // Use parent callback to update lab results
-  onLabResultAdd(labResult);
-  setNewLabResult({ type: '', name: '', results: '', file: null });
-  setShowLabUpload(false);
-};
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
 
-// Helper functions should be outside
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  });
-};
+  const getStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case 'Ongoing': return 'default';
+      case 'Cancer-Free': return 'default';
+      case 'Under Observation': return 'secondary';
+      case 'Recurrence': return 'destructive';
+      case 'Deceased': return 'destructive';
+      default: return 'outline';
+    }
+  };
 
-const getStatusBadgeVariant = (status: string) => {
-  switch (status) {
-    case 'Ongoing': return 'default';
-    case 'Cancer-Free': return 'default';
-    case 'Under Observation': return 'secondary';
-    case 'Recurrence': return 'destructive';
-    case 'Deceased': return 'destructive';
-    default: return 'outline';
-  }
-};
+  const handleFileDownload = (file: { name: string; url: string; type: string }) => {
+    const link = document.createElement('a');
+    link.href = file.url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="space-y-6">
@@ -155,7 +184,7 @@ const getStatusBadgeVariant = (status: string) => {
         <CardHeader>
           <CardTitle>Existing Patients</CardTitle>
           <CardDescription>
-            Search and manage existing patient records
+            Search and manage existing patient records ({patients.length} total patients)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -173,7 +202,7 @@ const getStatusBadgeVariant = (status: string) => {
             <div className="grid gap-4">
               {filteredPatients.length === 0 ? (
                 <div className="text-center py-8">
-                  <User className="mx-auto h-12 w-12 text-muted-foreground" />
+                  <UserIcon className="mx-auto h-12 w-12 text-muted-foreground" />
                   <h3 className="mt-2 font-medium">No patients found</h3>
                   <p className="text-muted-foreground">
                     {searchTerm ? 'Try adjusting your search terms.' : 'No patients have been registered yet.'}
@@ -195,14 +224,18 @@ const getStatusBadgeVariant = (status: string) => {
                             </div>
 
                             <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                              <div className="flex items-center space-x-1">
-                                <Mail className="h-3 w-3" />
-                                <span>{patient.email}</span>
-                              </div>
-                              <div className="flex items-center space-x-1">
-                                <Phone className="h-3 w-3" />
-                                <span>{patient.phone}</span>
-                              </div>
+                              {patient.email && (
+                                <div className="flex items-center space-x-1">
+                                  <Mail className="h-3 w-3" />
+                                  <span>{patient.email}</span>
+                                </div>
+                              )}
+                              {patient.phone && (
+                                <div className="flex items-center space-x-1">
+                                  <Phone className="h-3 w-3" />
+                                  <span>{patient.phone}</span>
+                                </div>
+                              )}
                               <div className="flex items-center space-x-1">
                                 <Calendar className="h-3 w-3" />
                                 <span>Added {formatDate(patient.createdAt)}</span>
@@ -300,10 +333,16 @@ const getStatusBadgeVariant = (status: string) => {
                                           <div><strong>Name:</strong> {selectedPatient.name}</div>
                                           <div><strong>Age:</strong> {selectedPatient.age}</div>
                                           <div><strong>Gender:</strong> {selectedPatient.gender}</div>
-                                          <div><strong>Email:</strong> {selectedPatient.email}</div>
-                                          <div><strong>Phone:</strong> {selectedPatient.phone}</div>
-                                          <div className="col-span-2"><strong>Address:</strong> {selectedPatient.address}</div>
-                                          {selectedPatient.emergencyContact.name && (
+                                          {selectedPatient.email && (
+                                            <div><strong>Email:</strong> {selectedPatient.email}</div>
+                                          )}
+                                          {selectedPatient.phone && (
+                                            <div><strong>Phone:</strong> {selectedPatient.phone}</div>
+                                          )}
+                                          {selectedPatient.address && (
+                                            <div className="col-span-2"><strong>Address:</strong> {selectedPatient.address}</div>
+                                          )}
+                                          {selectedPatient.emergencyContact?.name && (
                                             <div className="col-span-2">
                                               <strong>Emergency Contact:</strong> {selectedPatient.emergencyContact.name} 
                                               ({selectedPatient.emergencyContact.relationship}) - {selectedPatient.emergencyContact.phone}
@@ -319,7 +358,7 @@ const getStatusBadgeVariant = (status: string) => {
                                     <div className="space-y-2">
                                       <h3 className="font-medium">Medical History</h3>
                                       <div className="flex flex-wrap gap-2">
-                                        {selectedPatient.medicalHistory.length > 0 ? (
+                                        {selectedPatient.medicalHistory?.length > 0 ? (
                                           selectedPatient.medicalHistory.map((condition, index) => (
                                             <Badge key={index} variant="secondary">{condition}</Badge>
                                           ))
@@ -333,7 +372,7 @@ const getStatusBadgeVariant = (status: string) => {
                                     <div className="space-y-2">
                                       <h3 className="font-medium">Allergies</h3>
                                       <div className="flex flex-wrap gap-2">
-                                        {selectedPatient.allergies.length > 0 ? (
+                                        {selectedPatient.allergies?.length > 0 ? (
                                           selectedPatient.allergies.map((allergy, index) => (
                                             <Badge key={index} variant="destructive">{allergy}</Badge>
                                           ))
@@ -416,7 +455,7 @@ const getStatusBadgeVariant = (status: string) => {
                                         {getPatientLabResults(selectedPatient.id).map((result) => (
                                           <Card key={result.id} className="p-3">
                                             <div className="flex items-start justify-between">
-                                              <div>
+                                              <div className="flex-1">
                                                 <div className="flex items-center space-x-2">
                                                   <Badge variant="outline">{result.type}</Badge>
                                                   <h4 className="font-medium">{result.name}</h4>
@@ -427,7 +466,11 @@ const getStatusBadgeVariant = (status: string) => {
                                                 <p className="text-sm mt-2">{result.results}</p>
                                                 {result.file && (
                                                   <div className="mt-2">
-                                                    <Button variant="outline" size="sm">
+                                                    <Button 
+                                                      variant="outline" 
+                                                      size="sm"
+                                                      onClick={() => handleFileDownload(result.file!)}
+                                                    >
                                                       <FileText className="h-3 w-3 mr-1" />
                                                       {result.file.name}
                                                     </Button>

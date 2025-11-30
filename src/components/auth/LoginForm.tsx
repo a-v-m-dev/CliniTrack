@@ -20,41 +20,100 @@ interface LoginFormProps {
 }
 
 interface UserRecord {
-  _id?: string;
+  _id: string;
+  type: 'user';
   name: string;
   email: string;
   password: string;
   role: 'secretary' | 'doctor';
-  type: 'user';
+  createdAt: string;
+  synced?: boolean;
 }
 
 export function LoginForm({ onForgotPassword, onRegister }: LoginFormProps) {
   const { login, isLoading } = useAuth();
-
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isCheckingLocal, setIsCheckingLocal] = useState(false);
 
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError('');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
 
-  if (!formData.email || !formData.password) {
-    setError('Please fill in all required fields.');
-    return;
-  }
+    if (!formData.email || !formData.password) {
+      setError('Please fill in all required fields.');
+      return;
+    }
 
-  const result = await login(formData.email, formData.password);
+    setIsCheckingLocal(true);
 
-  if (!result.success) {
-    setError(result.error || 'Login failed.');
-  } else {
-    console.log('✅ Logged in successfully!');
-  }
-};
+    try {
+      // First, try remote login
+      console.log('🔐 Attempting remote login...');
+      const remoteResult = await login(formData.email, formData.password);
+
+      if (remoteResult.success) {
+        console.log('✅ Remote login successful!');
+        return;
+      }
+
+      // If remote login fails, try local PouchDB authentication
+      console.log('🌐 Remote login failed, checking local database...');
+      
+      try {
+        // Try to find user in local PouchDB
+        const userDocId = `user_${formData.email}`;
+        const userDoc = await db.get<UserRecord>(userDocId);
+        
+        if (userDoc && userDoc.type === 'user') {
+          // Verify password (in production, you should hash passwords!)
+          if (userDoc.password === formData.password) {
+            console.log('✅ Local login successful!');
+            
+            // Simulate login success by calling the auth context with local user data
+            // You might need to modify your AuthContext to handle local logins
+            const localLoginResult = await login(formData.email, formData.password, true);
+            
+            if (localLoginResult.success) {
+              console.log('✅ Local authentication completed!');
+              return;
+            } else {
+              setError('Local authentication failed.');
+            }
+          } else {
+            setError('Invalid password.');
+          }
+        } else {
+          setError('User not found locally. Please check your credentials.');
+        }
+      } catch (localErr: any) {
+        if (localErr.name === 'not_found') {
+          setError('User not found. Please check your email or register.');
+        } else {
+          console.error('Local auth error:', localErr);
+          setError('Authentication error. Please try again.');
+        }
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Login failed. Please try again.');
+    } finally {
+      setIsCheckingLocal(false);
+    }
+  };
+
+  const handleDemoLogin = async (email: string, password: string) => {
+    setFormData({ email, password });
+    
+    // Small delay to let the form update
+    setTimeout(async () => {
+      await handleSubmit(new Event('submit') as any);
+    }, 100);
+  };
 
   return (
     <Card className="w-full max-w-md mx-auto">
@@ -90,7 +149,7 @@ const handleSubmit = async (e: React.FormEvent) => {
               placeholder="Enter your email"
               value={formData.email}
               onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-              disabled={isLoading}
+              disabled={isLoading || isCheckingLocal}
             />
           </div>
 
@@ -103,7 +162,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 placeholder="Enter your password"
                 value={formData.password}
                 onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                disabled={isLoading}
+                disabled={isLoading || isCheckingLocal}
               />
               <Button
                 type="button"
@@ -111,6 +170,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 size="icon"
                 className="absolute right-0 top-0 h-full px-3"
                 onClick={() => setShowPassword(!showPassword)}
+                disabled={isLoading || isCheckingLocal}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>
@@ -123,11 +183,15 @@ const handleSubmit = async (e: React.FormEvent) => {
             </Alert>
           )}
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? (
+          <Button 
+            type="submit" 
+            className="w-full" 
+            disabled={isLoading || isCheckingLocal}
+          >
+            {(isLoading || isCheckingLocal) ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Signing in...
+                {isCheckingLocal ? 'Checking local database...' : 'Signing in...'}
               </>
             ) : (
               'Sign In'
@@ -156,17 +220,6 @@ const handleSubmit = async (e: React.FormEvent) => {
             </div>
           </div>
         </form>
-
-        <div className="mt-6 p-4 bg-muted rounded-lg">
-          <p className="text-sm font-medium mb-2">Demo Accounts:</p>
-          <div className="text-xs space-y-1">
-            <div>Doctor: doctor@clinitrack.com / doctor123</div>
-            <div>Secretary: secretary@clinitrack.com / secretary123</div>
-          </div>
-          <div className="mt-2 pt-2 border-t border-border">
-            <p className="text-xs font-medium text-emerald-600">Direct login enabled - No 2FA required</p>
-          </div>
-        </div>
       </CardContent>
     </Card>
   );
