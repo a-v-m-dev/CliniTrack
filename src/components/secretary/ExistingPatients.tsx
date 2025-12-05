@@ -6,14 +6,13 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { Search, User as UserIcon, Phone, Mail, Calendar, Edit, Upload, FileText } from 'lucide-react';
+import { Search, User as UserIcon, Phone, Mail, Calendar, Edit, Upload, FileText, Trash2, ImageIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Separator } from '../ui/separator';
 import { useAuth } from '../../contexts/AuthContext';
 
-// Define User interface locally since it's not exported from types
 interface User {
   _id: string;
   type: 'user';
@@ -23,8 +22,36 @@ interface User {
   createdAt: string;
 }
 
+interface StoredLabResult {
+  _id: string;
+  type: 'labResult';
+  patientId: string;
+  name: string;
+  fileType: string;
+  fileName: string;
+  fileSize: number;
+  fileData: string;
+  date: string;
+  uploadedBy: string;
+  labType?: string;
+}
+
+// New Activity Log Interface
+interface ActivityLog {
+  _id: string;
+  type: 'activity';
+  activityType: 'patient_edit' | 'lab_upload';
+  patientId: string;
+  patientName: string;
+  labType?: string; // For lab uploads: Blood Test, Imaging, etc.
+  labFileName?: string;
+  performedBy: string;
+  timestamp: string;
+  details?: string;
+}
+
 interface ExistingPatientsProps {
-  patients: Patient[]; // Add this line - accept patients as prop
+  patients: Patient[];
   labResults: LabResult[];
   onPatientUpdate: (patient: Patient) => void;
   onLabResultAdd: (result: LabResult) => void;
@@ -43,11 +70,12 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
   });
   const [showLabUpload, setShowLabUpload] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [patientLabFiles, setPatientLabFiles] = useState<StoredLabResult[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const { user: authUser } = useAuth();
   const db = new PouchDB('CliniTrack');
 
-  // Fetch current user from PouchDB
   useEffect(() => {
     const fetchCurrentUser = async () => {
       if (!authUser?.email) return;
@@ -68,13 +96,24 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
     fetchCurrentUser();
   }, [authUser?.email]);
 
-  // REMOVE the useEffect that fetches patients since we're getting them as props now
-  // useEffect(() => {
-  //   const fetchPatients = async () => {
-  //     // ... existing patient fetching code
-  //   };
-  //   fetchPatients();
-  // }, []);
+  useEffect(() => {
+    const fetchPatientLabFiles = async () => {
+      if (!selectedPatient) return;
+
+      try {
+        const allDocs = await db.allDocs({ include_docs: true });
+        const labFiles = allDocs.rows
+          .map((row: { doc: any; }) => row.doc)
+          .filter((doc: any) => doc?.type === 'labResult' && doc.patientId === selectedPatient.id) as StoredLabResult[];
+
+        setPatientLabFiles(labFiles);
+      } catch (err) {
+        console.error('Failed to fetch lab files:', err);
+      }
+    };
+
+    fetchPatientLabFiles();
+  }, [selectedPatient]);
 
   const filteredPatients = patients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -92,6 +131,32 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
     setIsEditing(true);
   };
 
+  // Log activity helper function
+  const logActivity = async (activityType: 'patient_edit' | 'lab_upload', patient: Patient, labType?: string, labFileName?: string) => {
+    try {
+      const activityId = `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const activity: ActivityLog = {
+        _id: activityId,
+        type: 'activity',
+        activityType,
+        patientId: patient.id,
+        patientName: patient.name,
+        labType,
+        labFileName,
+        performedBy: currentUser?.name || authUser?.name || 'System User',
+        timestamp: new Date().toISOString(),
+        details: activityType === 'patient_edit' 
+          ? `Updated patient information for ${patient.name}`
+          : `Uploaded ${labType || 'file'} for ${patient.name}`
+      };
+
+      await db.put(activity);
+      console.log('✅ Activity logged:', activity);
+    } catch (err) {
+      console.error('Failed to log activity:', err);
+    }
+  };
+
   const handleSaveEdit = async () => {
     if (selectedPatient && editFormData) {
       const updatedPatient: Patient = {
@@ -103,9 +168,12 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
       try {
         const existingDoc = await db.get(selectedPatient.id);
         await db.put({ ...existingDoc, ...updatedPatient });
-        onPatientUpdate(updatedPatient); // Use the callback to update parent state
+        onPatientUpdate(updatedPatient);
         setSelectedPatient(updatedPatient);
         setIsEditing(false);
+
+        // Log the patient edit activity
+        await logActivity('patient_edit', updatedPatient);
       } catch (err) {
         console.error('Failed to update patient in PouchDB:', err);
       }
@@ -114,40 +182,63 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
 
   const handleLabUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPatient || !newLabResult.type || !newLabResult.name || !newLabResult.results) return;
+    if (!selectedPatient || !newLabResult.file) return;
 
-    const labResult: LabResult = {
-      id: `lab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      patientId: selectedPatient.id,
-      type: newLabResult.type as any,
-      name: newLabResult.name,
-      date: new Date().toISOString(),
-      results: newLabResult.results,
-      file: newLabResult.file
-        ? {
-            name: newLabResult.file.name,
-            url: URL.createObjectURL(newLabResult.file),
-            type: newLabResult.file.type
-          }
-        : undefined,
-      uploadedBy: currentUser?.name || authUser?.name || 'System User'
-    };
-
-    // Save to PouchDB
     try {
-      await db.put({
-        _id: labResult.id,
-        ...labResult
-      });
-      console.log('✅ Lab result saved to PouchDB:', labResult.id);
-    } catch (err) {
-      console.error('Failed to save lab result to PouchDB:', err);
-    }
+      const fileData = await newLabResult.file.arrayBuffer();
+      const base64Data = btoa(
+        new Uint8Array(fileData).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
 
-    // Use parent callback to update lab results
-    onLabResultAdd(labResult);
-    setNewLabResult({ type: '', name: '', results: '', file: null });
-    setShowLabUpload(false);
+      const labResultId = `lab_${selectedPatient.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      await db.put({
+        _id: labResultId,
+        type: 'labResult',
+        patientId: selectedPatient.id,
+        name: newLabResult.name || newLabResult.file.name,
+        fileType: newLabResult.file.type,
+        fileName: newLabResult.file.name,
+        fileSize: newLabResult.file.size,
+        fileData: base64Data,
+        date: new Date().toISOString(),
+        uploadedBy: currentUser?.name || authUser?.name || 'System User',
+        results: newLabResult.results || '',
+        labType: newLabResult.type || 'Other'
+      });
+
+      console.log('✅ Lab file saved to PouchDB:', newLabResult.file.name);
+
+      // Log the lab upload activity
+      await logActivity('lab_upload', selectedPatient, newLabResult.type || 'Other', newLabResult.file.name);
+
+      // Refresh the lab files list
+      const allDocs = await db.allDocs({ include_docs: true });
+      const labFiles = allDocs.rows
+        .map((row: { doc: any; }) => row.doc)
+        .filter((doc: any) => doc?.type === 'labResult' && doc.patientId === selectedPatient.id) as StoredLabResult[];
+
+      setPatientLabFiles(labFiles);
+
+      setNewLabResult({ type: '', name: '', results: '', file: null });
+      setShowLabUpload(false);
+    } catch (err) {
+      console.error('Failed to save lab file to PouchDB:', err);
+    }
+  };
+
+  const handleDeleteLabFile = async (labFileId: string) => {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+
+    try {
+      const doc = await db.get(labFileId);
+      await db.remove(doc);
+
+      setPatientLabFiles(prev => prev.filter(f => f._id !== labFileId));
+      console.log('✅ Lab file deleted from PouchDB');
+    } catch (err) {
+      console.error('Failed to delete lab file:', err);
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -156,6 +247,14 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -169,13 +268,8 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
     }
   };
 
-  const handleFileDownload = (file: { name: string; url: string; type: string }) => {
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.download = file.name;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const getBase64ImageSrc = (fileData: string, fileType: string) => {
+    return `data:${fileType};base64,${fileData}`;
   };
 
   return (
@@ -250,6 +344,7 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
                             )}
                           </div>
 
+                          {/* modal view patient details */}
                           <div className="flex space-x-2">
                             <Dialog>
                               <DialogTrigger asChild>
@@ -344,7 +439,7 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
                                           )}
                                           {selectedPatient.emergencyContact?.name && (
                                             <div className="col-span-2">
-                                              <strong>Emergency Contact:</strong> {selectedPatient.emergencyContact.name} 
+                                              <strong>Emergency Contact:</strong> {selectedPatient.emergencyContact.name}
                                               ({selectedPatient.emergencyContact.relationship}) - {selectedPatient.emergencyContact.phone}
                                             </div>
                                           )}
@@ -384,17 +479,17 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
 
                                     <Separator />
 
-                                    {/* Lab Results */}
+                                    {/* Lab Files & Images */}
                                     <div className="space-y-4">
                                       <div className="flex items-center justify-between">
-                                        <h3 className="font-medium">Lab Results</h3>
+                                        <h3 className="font-medium">Lab/Imaging Files ({patientLabFiles.length})</h3>
                                         <Button
                                           variant="outline"
                                           size="sm"
                                           onClick={() => setShowLabUpload(true)}
                                         >
                                           <Upload className="h-4 w-4 mr-2" />
-                                          Upload New Result
+                                          Upload New File
                                         </Button>
                                       </div>
 
@@ -403,7 +498,7 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
                                           <form onSubmit={handleLabUpload} className="space-y-4">
                                             <div className="grid grid-cols-2 gap-4">
                                               <div className="space-y-2">
-                                                <Label>Type</Label>
+                                                <Label>Type *</Label>
                                                 <Select value={newLabResult.type} onValueChange={(value) => setNewLabResult(prev => ({ ...prev, type: value }))}>
                                                   <SelectTrigger>
                                                     <SelectValue placeholder="Select type" />
@@ -427,63 +522,87 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
                                               </div>
                                             </div>
                                             <div className="space-y-2">
-                                              <Label>Results</Label>
+                                              <Label>Results/Notes (optional)</Label>
                                               <Textarea
                                                 value={newLabResult.results}
                                                 onChange={(e) => setNewLabResult(prev => ({ ...prev, results: e.target.value }))}
-                                                placeholder="Enter test results..."
+                                                placeholder="Enter test results or notes..."
                                                 rows={3}
                                               />
                                             </div>
                                             <div className="space-y-2">
-                                              <Label>File (optional)</Label>
+                                              <Label>File *</Label>
                                               <Input
                                                 type="file"
-                                                accept=".pdf,.png,.jpg,.jpeg"
+                                                accept=".pdf,.png,.jpg,.jpeg,image/*"
                                                 onChange={(e) => setNewLabResult(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
                                               />
                                             </div>
                                             <div className="flex space-x-2">
-                                              <Button type="submit">Upload Result</Button>
-                                              <Button type="button" variant="outline" onClick={() => setShowLabUpload(false)}>Cancel</Button>
+                                              <Button type="submit" disabled={!newLabResult.file || !newLabResult.type}>
+                                                Upload File
+                                              </Button>
+                                              <Button type="button" variant="outline" onClick={() => setShowLabUpload(false)}>
+                                                Cancel
+                                              </Button>
                                             </div>
                                           </form>
                                         </Card>
                                       )}
 
-                                      <div className="space-y-2">
-                                        {getPatientLabResults(selectedPatient.id).map((result) => (
-                                          <Card key={result.id} className="p-3">
-                                            <div className="flex items-start justify-between">
-                                              <div className="flex-1">
-                                                <div className="flex items-center space-x-2">
-                                                  <Badge variant="outline">{result.type}</Badge>
-                                                  <h4 className="font-medium">{result.name}</h4>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {patientLabFiles.map((labFile) => {
+                                          const isImage = labFile.fileType.startsWith('image/');
+
+                                          return (
+                                            <Card key={labFile._id} className="overflow-hidden">
+                                              {isImage ? (
+                                                <div
+                                                  className="aspect-video bg-muted cursor-pointer relative group"
+                                                  onClick={() => setSelectedImage(getBase64ImageSrc(labFile.fileData, labFile.fileType))}
+                                                >
+                                                  <img
+                                                    src={getBase64ImageSrc(labFile.fileData, labFile.fileType)}
+                                                    alt={labFile.name}
+                                                    className="w-full h-full object-cover"
+                                                  />
+                                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                    <ImageIcon className="h-8 w-8 text-white" />
+                                                  </div>
                                                 </div>
-                                                <p className="text-sm text-muted-foreground mt-1">
-                                                  {formatDate(result.date)} • Uploaded by {result.uploadedBy}
-                                                </p>
-                                                <p className="text-sm mt-2">{result.results}</p>
-                                                {result.file && (
-                                                  <div className="mt-2">
-                                                    <Button 
-                                                      variant="outline" 
+                                              ) : (
+                                                <div className="aspect-video bg-muted flex items-center justify-center">
+                                                  <FileText className="h-12 w-12 text-muted-foreground" />
+                                                </div>
+                                              )}
+
+                                              <CardContent className="p-3">
+                                                <div className="space-y-2">
+                                                  <div>
+                                                    <p className="font-medium text-sm truncate">{labFile.name}</p>
+                                                    <p className="text-xs text-muted-foreground">{formatDate(labFile.date)}</p>
+                                                  </div>
+                                                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                    <span>{formatFileSize(labFile.fileSize)}</span>
+                                                    <Button
+                                                      variant="ghost"
                                                       size="sm"
-                                                      onClick={() => handleFileDownload(result.file!)}
+                                                      className="h-6 px-2"
+                                                      onClick={() => handleDeleteLabFile(labFile._id)}
                                                     >
-                                                      <FileText className="h-3 w-3 mr-1" />
-                                                      {result.file.name}
+                                                      <Trash2 className="h-3 w-3" />
                                                     </Button>
                                                   </div>
-                                                )}
-                                              </div>
-                                            </div>
-                                          </Card>
-                                        ))}
+                                                  <p className="text-xs">Uploaded by: {labFile.uploadedBy}</p>
+                                                </div>
+                                              </CardContent>
+                                            </Card>
+                                          );
+                                        })}
 
-                                        {getPatientLabResults(selectedPatient.id).length === 0 && (
-                                          <div className="text-center py-4 text-muted-foreground text-sm">
-                                            No lab results uploaded yet
+                                        {patientLabFiles.length === 0 && (
+                                          <div className="col-span-full text-center py-8 text-muted-foreground text-sm">
+                                            No lab files uploaded yet
                                           </div>
                                         )}
                                       </div>
@@ -503,6 +622,24 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
           </div>
         </CardContent>
       </Card>
+
+      {/* Image Preview Modal */}
+      {selectedImage && (
+        <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Image Preview</DialogTitle>
+            </DialogHeader>
+            <div className="relative">
+              <img
+                src={selectedImage}
+                alt="Lab result preview"
+                className="w-full h-auto max-h-[70vh] object-contain"
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

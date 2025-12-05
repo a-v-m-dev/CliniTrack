@@ -16,7 +16,7 @@ import { Reports } from './components/reports/Reports';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { HelpPage } from './components/help/HelpPage';
 import { Toaster } from './components/ui/sonner';
-import { mockPatients, mockLabResults, mockVisits, mockRiskAssessments } from './data/mockData';
+// import { mockPatients, mockLabResults, mockVisits, mockRiskAssessments } from './data/mockData';
 import { Patient, LabResult, Visit, RiskAssessment } from './types';
 
 function AppContent() {
@@ -25,10 +25,31 @@ function AppContent() {
   const [activeView, setActiveView] = useState('dashboard');
   
   // Application state
-  const [patients, setPatients] = useState<Patient[]>(mockPatients);
-  const [labResults, setLabResults] = useState<LabResult[]>(mockLabResults);
-  const [visits, setVisits] = useState<Visit[]>(mockVisits);
-  const [riskAssessments, setRiskAssessments] = useState<RiskAssessment[]>(mockRiskAssessments);
+  // const [patients, setPatients] = useState<Patient[]>(mockPatients);
+  // const [labResults, setLabResults] = useState<LabResult[]>(mockLabResults);
+  // const [visits, setVisits] = useState<Visit[]>(mockVisits);
+  // const [riskAssessments, setRiskAssessments] = useState<RiskAssessment[]>(mockRiskAssessments);
+
+  //new
+  const [patients, setPatients] = useState<Patient[]>(() => {
+    const storedPatients = localStorage.getItem('clinitrack_patients')
+    return storedPatients ? JSON.parse(storedPatients) : []
+  })
+
+  const [labResults, setLabResults] = useState<LabResult[]>(() =>  {
+    const storedLabResults = localStorage.getItem('clinitrack_labResults')
+    return storedLabResults ? JSON.parse(storedLabResults) : [] 
+  })
+
+  const [visits, setVisits] = useState<Visit[]>(() => {
+    const storedVisits = localStorage.getItem('clinictrack_visits')
+    return storedVisits ? JSON.parse(storedVisits) : []
+  })
+
+  const [riskAssessments, setRiskAssessments] = useState<RiskAssessment[]>(() => {
+    const storedRiskAssessments = localStorage.getItem('clinitrack_riskAssessments')
+    return storedRiskAssessments ? JSON.parse(storedRiskAssessments) : []
+  })
 
   // Persist data to localStorage
   useEffect(() => {

@@ -182,54 +182,6 @@ export function HelpPage() {
               ))}
             </CardContent>
           </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center space-x-2">
-                  <Video className="h-5 w-5" />
-                  <CardTitle className="text-lg">Video Tutorials</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button variant="outline" className="w-full justify-start">
-                  <Video className="h-4 w-4 mr-2" />
-                  Getting Started with CliniTrack
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Video className="h-4 w-4 mr-2" />
-                  {user?.role === 'secretary' ? 'Patient Registration Process' : 'AI Risk Assessment Guide'}
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Video className="h-4 w-4 mr-2" />
-                  {user?.role === 'secretary' ? 'File Upload and Management' : 'Analytics Dashboard Overview'}
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="flex items-center space-x-2">
-                  <FileText className="h-5 w-5" />
-                  <CardTitle className="text-lg">Quick Reference</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button variant="outline" className="w-full justify-start">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Keyboard Shortcuts
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Feature Checklist
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Troubleshooting Guide
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
 
         <TabsContent value="faq" className="space-y-4">

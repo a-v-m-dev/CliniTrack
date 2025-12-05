@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PouchDB from 'pouchdb-browser';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -9,14 +10,110 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Alert, AlertDescription } from '../ui/alert';
 import { Activity, Brain, CheckCircle, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { Patient, RiskAssessment } from '../../types';
-import { generateRiskAssessment, calculateBMI } from '../../data/mockData';
+import { calculateBMI } from '../../data/mockData';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface RiskAssessmentProps {
   patients: Patient[];
   onRiskAssessmentCreate: (assessment: RiskAssessment) => void;
 }
 
+// NEW RISK CALCULATION FUNCTIONS
+function calculateNewRiskScore(input: {
+  age: number;
+  stage?: string;
+  status?: string;
+  cancerType?: string;
+  symptoms: string[];
+  symptomSeverity?: number;
+  comorbidities?: string[];
+  patient: any;
+}): number {
+  let totalScore = 0;
+
+  // 1. Age Score (0-15 points)
+  const ageScore = 
+    input.age >= 75 ? 15 :
+    input.age >= 65 ? 12 :
+    input.age >= 55 ? 9 :
+    input.age >= 45 ? 6 :
+    input.age >= 35 ? 3 : 0;
+  totalScore += ageScore;
+
+  // 2. Stage Score (0-25 points)
+  const stage = input.stage?.toUpperCase() || 'UNDETERMINED';
+  const stageScore = 
+    stage === 'IV' ? 25 :
+    stage === 'III' ? 18 :
+    stage === 'II' ? 10 :
+    stage === 'I' ? 4 : 0;
+  totalScore += stageScore;
+
+  // 3. Status Score (0-20 points)
+  const statusScore = 
+    input.status === 'Deceased' ? 20 :
+    input.status === 'Recurrence' ? 18 :
+    input.status === 'Ongoing Treatment' ? 14 :
+    input.status === 'New' ? 10 : 0;
+  totalScore += statusScore;
+
+  // 4. Type Score (0-15 points)
+  const cancerType = input.cancerType?.toLowerCase() || '';
+  const typeScore = 
+    cancerType.includes('lung') || cancerType.includes('pancreatic') ? 15 :
+    cancerType.includes('liver') || cancerType.includes('brain') ? 13 :
+    cancerType.includes('breast') || cancerType.includes('colorectal') ? 10 :
+    cancerType.includes('prostate') || cancerType.includes('thyroid') ? 6 : 8;
+  totalScore += typeScore;
+
+  // 5. Symptom Score (0-15 points)
+  const symptomCount = input.symptoms.length;
+  const baseSymptomScore = Math.min(symptomCount * 2, 10);
+  const severityBonus = (input.symptomSeverity || 5) > 7 ? 5 : 0;
+  const symptomScore = Math.min(baseSymptomScore + severityBonus, 15);
+  totalScore += symptomScore;
+
+  // 6. Severity Score (0-10 points)
+  const severityScore = input.symptomSeverity 
+    ? Math.round((input.symptomSeverity / 10) * 10) 
+    : 5;
+  totalScore += severityScore;
+
+  // 7. Comorbidity Score (0-10 points)
+  const comorbidityCount = input.comorbidities?.length || 
+                           input.patient?.medicalHistory?.length || 0;
+  const comorbidityScore = Math.min(comorbidityCount * 2, 10);
+  totalScore += comorbidityScore;
+
+  // Additional lifestyle factors (0-10 points)
+  let lifestyleScore = 0;
+  if (input.patient?.smokingStatus === 'Current Smoker') lifestyleScore += 5;
+  else if (input.patient?.smokingStatus === 'Former Smoker') lifestyleScore += 3;
+  if (input.patient?.alcoholFrequency === 'Daily') lifestyleScore += 3;
+  else if (input.patient?.alcoholFrequency === 'Weekly') lifestyleScore += 2;
+  if (input.patient?.cancerHistory) lifestyleScore += 5;
+  totalScore += Math.min(lifestyleScore, 10);
+
+  return Math.min(Math.round(totalScore), 100);
+}
+
+function getRiskLevelFromScore(score: number): 'Low' | 'Moderate' | 'High' {
+  if (score >= 65) return 'High';
+  if (score >= 35) return 'Moderate';
+  return 'Low';
+}
+
+function getUrgencyLevel(score: number, stage?: string): string {
+  if (score >= 80 || stage === 'IV') return 'Emergency';
+  if (score >= 65 || stage === 'III') return 'Urgent';
+  if (score >= 50) return 'Priority';
+  return 'Routine';
+}
+
 export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: RiskAssessmentProps) {
+  const { user: authUser } = useAuth();
+  const db = new PouchDB('CliniTrack');
+  
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [newSymptom, setNewSymptom] = useState('');
@@ -26,6 +123,11 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
   const [overrideRiskLevel, setOverrideRiskLevel] = useState<'Low' | 'Moderate' | 'High'>('Low');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // NEW: Additional fields for enhanced assessment
+  const [patientStage, setPatientStage] = useState<string>('Undetermined');
+  const [patientStatus, setPatientStatus] = useState<string>('New');
+  const [symptomSeverity, setSymptomSeverity] = useState<number>(5);
 
   const selectedPatient = patients.find(p => p.id === selectedPatientId);
 
@@ -72,11 +174,97 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
     setIsAnalyzing(true);
     setAssessment(null);
 
-    // Simulate AI analysis delay
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    const newAssessment = generateRiskAssessment(symptoms, selectedPatient.age, selectedPatient.gender, selectedPatient);
-    newAssessment.patientId = selectedPatient.id;
+    // Determine suspected cancer types
+    const suspectedTypes: string[] = [];
+    const breastSymptoms = ['breast lump', 'nipple discharge', 'breast pain'];
+    const lungSymptoms = ['persistent cough', 'shortness of breath', 'chest pain', 'coughing blood'];
+    const colorectalSymptoms = ['blood in stool', 'abdominal pain', 'change in bowel habits'];
+    
+    const lowerSymptoms = symptoms.map(s => s.toLowerCase());
+    
+    if (breastSymptoms.some(s => lowerSymptoms.some(ls => ls.includes(s)))) {
+      suspectedTypes.push('Breast Cancer');
+    }
+    if (lungSymptoms.some(s => lowerSymptoms.some(ls => ls.includes(s)))) {
+      suspectedTypes.push('Lung Cancer');
+    }
+    if (colorectalSymptoms.some(s => lowerSymptoms.some(ls => ls.includes(s)))) {
+      suspectedTypes.push('Colorectal Cancer');
+    }
+    if (suspectedTypes.length === 0) {
+      suspectedTypes.push('General Cancer');
+    }
+
+    // Calculate risk score using NEW FORMULA
+    const riskScore = calculateNewRiskScore({
+      age: selectedPatient.age,
+      stage: patientStage !== 'Undetermined' ? patientStage : undefined,
+      status: patientStatus,
+      cancerType: suspectedTypes[0],
+      symptoms,
+      symptomSeverity,
+      comorbidities: selectedPatient.medicalHistory,
+      patient: selectedPatient
+    });
+
+    const riskLevel = getRiskLevelFromScore(riskScore);
+    const urgencyLevel = getUrgencyLevel(riskScore, patientStage);
+    
+    // Build risk factors list
+    const factors: string[] = [];
+    factors.push(`Risk Score: ${riskScore}/100 (New Formula Applied)`);
+    if (selectedPatient.age >= 65) factors.push(`Age ${selectedPatient.age} - increased risk factor`);
+    if (patientStage && patientStage !== 'Undetermined') factors.push(`Cancer Stage: ${patientStage}`);
+    if (patientStatus) factors.push(`Patient Status: ${patientStatus}`);
+    if (symptoms.length >= 5) factors.push(`Multiple symptoms present (${symptoms.length})`);
+    if (selectedPatient.cancerHistory) factors.push('Previous cancer history');
+    if (selectedPatient.smokingStatus === 'Current Smoker') factors.push('Current smoker');
+    if (selectedPatient.medicalHistory?.length > 0) {
+      factors.push(`Comorbidities: ${selectedPatient.medicalHistory.join(', ')}`);
+    }
+    if (symptomSeverity >= 8) factors.push(`Severe symptoms (Severity: ${symptomSeverity}/10)`);
+
+    // Generate recommendations
+    let recommendation = '';
+    if (riskLevel === 'High') {
+      recommendation = `Immediate medical attention required. Risk score: ${riskScore}/100. Comprehensive diagnostic workup recommended including imaging studies and specialist consultation.`;
+    } else if (riskLevel === 'Moderate') {
+      recommendation = `Schedule follow-up within 1-2 weeks. Risk score: ${riskScore}/100. Additional testing may be warranted based on clinical judgment.`;
+    } else {
+      recommendation = `Monitor symptoms. Risk score: ${riskScore}/100. Routine follow-up recommended. Educate patient on warning signs.`;
+    }
+
+    // Recommended tests
+    const recommendedTests: string[] = [];
+    suspectedTypes.forEach(type => {
+      if (type.includes('Breast')) {
+        recommendedTests.push('Mammography', 'Breast Ultrasound', 'Biopsy');
+      }
+      if (type.includes('Lung')) {
+        recommendedTests.push('Chest X-ray', 'CT Scan', 'Sputum Cytology', 'Bronchoscopy');
+      }
+      if (type.includes('Colorectal')) {
+        recommendedTests.push('Colonoscopy', 'Fecal Occult Blood Test', 'CT Colonography');
+      }
+    });
+
+    const newAssessment: RiskAssessment = {
+      id: '',
+      patientId: selectedPatient.id,
+      visitId: '',
+      riskLevel,
+      confidence: Math.min(85 + Math.floor(Math.random() * 15), 99),
+      factors,
+      recommendation,
+      suspectedCancerTypes: suspectedTypes,
+      suggestedStage: patientStage,
+      urgencyLevel,
+      recommendedTests: [...new Set(recommendedTests)],
+      date: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
     
     setAssessment(newAssessment);
     setIsAnalyzing(false);
@@ -87,14 +275,44 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
     setIsSubmitting(true);
 
-    // Create final assessment with doctor's input
     const finalAssessment: RiskAssessment = {
       ...assessment,
-      visitId: Math.random().toString(36).substr(2, 9),
+      id: `assessment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      visitId: `visit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       doctorNotes: doctorNotes || undefined,
       doctorOverride: doctorOverride,
-      riskLevel: doctorOverride ? overrideRiskLevel : assessment.riskLevel
+      riskLevel: doctorOverride ? overrideRiskLevel : assessment.riskLevel,
+      date: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     };
+
+    try {
+      await db.put({
+        _id: finalAssessment.id,
+        type: 'riskAssessment',
+        ...finalAssessment
+      });
+
+      console.log('✅ Risk assessment saved to PouchDB:', finalAssessment.id);
+
+      const activityId = `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      await db.put({
+        _id: activityId,
+        type: 'activity',
+        activityType: 'risk_assessment',
+        patientId: selectedPatient.id,
+        patientName: selectedPatient.name,
+        riskLevel: finalAssessment.riskLevel,
+        diagnosis: finalAssessment.suspectedCancerTypes?.join(', ') || 'General Assessment',
+        performedBy: authUser?.name || 'Doctor',
+        timestamp: new Date().toISOString(),
+        details: `Risk assessment completed: ${finalAssessment.riskLevel} risk`
+      });
+
+      console.log('✅ Activity logged for risk assessment');
+    } catch (err) {
+      console.error('Failed to save risk assessment to PouchDB:', err);
+    }
 
     await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -106,6 +324,9 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
     setAssessment(null);
     setDoctorNotes('');
     setDoctorOverride(false);
+    setPatientStage('Undetermined');
+    setPatientStatus('New');
+    setSymptomSeverity(5);
     setIsSubmitting(false);
   };
 
@@ -136,7 +357,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
             <div>
               <CardTitle>AI Risk Assessment</CardTitle>
               <CardDescription>
-                Enter patient symptoms to get AI-powered risk analysis
+{/*               Using new scoring system: Age + Stage + Status + Type + Symptoms + Severity + Comorbidity */}
               </CardDescription>
             </div>
           </div>
@@ -186,6 +407,55 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                 </div>
               </div>
 
+              {/* NEW: Clinical Assessment Fields */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="space-y-2">
+                  <Label>Cancer Stage (if known)</Label>
+                  <Select value={patientStage} onValueChange={setPatientStage}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Undetermined">Undetermined</SelectItem>
+                      <SelectItem value="I">Stage I</SelectItem>
+                      <SelectItem value="II">Stage II</SelectItem>
+                      <SelectItem value="III">Stage III</SelectItem>
+                      <SelectItem value="IV">Stage IV</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Patient Status</Label>
+                  <Select value={patientStatus} onValueChange={setPatientStatus}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="New">New</SelectItem>
+                      <SelectItem value="Ongoing Treatment">Ongoing Treatment</SelectItem>
+                      <SelectItem value="Recurrence">Recurrence</SelectItem>
+                      <SelectItem value="Deceased">Deceased</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Symptom Severity: {symptomSeverity}/10</Label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={symptomSeverity}
+                    onChange={(e) => setSymptomSeverity(parseInt(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="text-xs text-muted-foreground text-center">
+                    {symptomSeverity <= 3 ? 'Mild' : symptomSeverity <= 6 ? 'Moderate' : 'Severe'}
+                  </div>
+                </div>
+              </div>
+
               {/* Symptom Input */}
               <div className="space-y-4">
                 <Label>Symptoms</Label>
@@ -231,7 +501,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                 {/* Selected Symptoms */}
                 {symptoms.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium mb-2">Selected symptoms:</p>
+                    <p className="text-sm font-medium mb-2">Selected symptoms ({symptoms.length}):</p>
                     <div className="flex flex-wrap gap-2">
                       {symptoms.map((symptom) => (
                         <Badge key={symptom} variant="secondary" className="cursor-pointer" onClick={() => removeSymptom(symptom)}>
@@ -251,11 +521,11 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                   {isAnalyzing ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Analyzing symptoms...
+                      Analyzing with new formula...
                     </>
                   ) : (
                     <>
-                      <Brain className="w-4 h-4 mr-2" />
+                      <Brain className="w-4 w-4 mr-2" />
                       Analyze Risk Level
                     </>
                   )}

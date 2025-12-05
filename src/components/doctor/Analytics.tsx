@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Badge } from '../ui/badge';
@@ -12,8 +12,7 @@ import {
   Users, TrendingUp, AlertTriangle, Calendar, Download, 
   FileSpreadsheet, FileText, Bell, Activity 
 } from 'lucide-react';
-import { Analytics as AnalyticsType, Patient, RiskAssessment } from '../../types';
-import { mockAnalytics } from '../../data/mockData';
+import { Patient, RiskAssessment } from '../../types';
 
 interface AnalyticsProps {
   patients: Patient[];
@@ -24,7 +23,150 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
   const [selectedTimeRange, setSelectedTimeRange] = useState('6months');
   const [selectedExportFormat, setSelectedExportFormat] = useState('pdf');
 
-  const analytics = mockAnalytics;
+  // Calculate real analytics from patient data
+  const analytics = useMemo(() => {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    // Total patients
+    const totalPatients = patients.length;
+
+    // New patients this month
+    const newPatientsThisMonth = patients.filter(p => 
+      new Date(p.createdAt) > thirtyDaysAgo
+    ).length;
+
+    // Status counts
+    const ongoingPatients = patients.filter(p => p.status === 'Ongoing').length;
+    const recurrenceCases = patients.filter(p => p.status === 'Recurrence').length;
+    const cancerFreePatients = patients.filter(p => p.status === 'Cancer-Free').length;
+    const underObservation = patients.filter(p => p.status === 'Under Observation').length;
+    const deceased = patients.filter(p => p.status === 'Deceased').length;
+
+    // Risk distribution from risk assessments
+    const riskDistribution = {
+      low: riskAssessments.filter(r => r.riskLevel === 'Low').length,
+      moderate: riskAssessments.filter(r => r.riskLevel === 'Moderate').length,
+      high: riskAssessments.filter(r => r.riskLevel === 'High').length
+    };
+
+    // Common symptoms from risk assessments
+    const symptomCounts: Record<string, number> = {};
+    riskAssessments.forEach(assessment => {
+      assessment.symptoms.forEach(symptom => {
+        symptomCounts[symptom] = (symptomCounts[symptom] || 0) + 1;
+      });
+    });
+
+    const commonSymptoms = Object.entries(symptomCounts)
+      .map(([symptom, count]) => ({ symptom, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // Monthly trends for the last 6 months
+    const monthlyTrends = [];
+    for (let i = 5; i >= 0; i--) {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      
+      const monthName = monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      
+      const monthPatients = patients.filter(p => {
+        const createdDate = new Date(p.createdAt);
+        return createdDate >= monthDate && createdDate < nextMonthDate;
+      });
+
+      monthlyTrends.push({
+        month: monthName,
+        ongoing: monthPatients.filter(p => p.status === 'Ongoing').length,
+        recurrence: monthPatients.filter(p => p.status === 'Recurrence').length,
+        cancerFree: monthPatients.filter(p => p.status === 'Cancer-Free').length
+      });
+    }
+
+    return {
+      totalPatients,
+      newPatientsThisMonth,
+      ongoingPatients,
+      recurrenceCases,
+      cancerFreePatients,
+      underObservation,
+      deceased,
+      riskDistribution,
+      commonSymptoms,
+      monthlyTrends
+    };
+  }, [patients, riskAssessments]);
+
+  // Age group analysis from real patient data
+  const ageGroupData = useMemo(() => {
+    const ageGroups = [
+      { group: '18-30', min: 18, max: 30 },
+      { group: '31-45', min: 31, max: 45 },
+      { group: '46-60', min: 46, max: 60 },
+      { group: '61-75', min: 61, max: 75 },
+      { group: '75+', min: 76, max: 150 }
+    ];
+
+    return ageGroups.map(ageGroup => {
+      const patientsInGroup = patients.filter(p => 
+        p.age >= ageGroup.min && p.age <= ageGroup.max
+      );
+
+      const patientIds = patientsInGroup.map(p => p.id);
+      const assessmentsInGroup = riskAssessments.filter(r => 
+        patientIds.includes(r.patientId)
+      );
+
+      return {
+        group: ageGroup.group,
+        low: assessmentsInGroup.filter(a => a.riskLevel === 'Low').length,
+        moderate: assessmentsInGroup.filter(a => a.riskLevel === 'Moderate').length,
+        high: assessmentsInGroup.filter(a => a.riskLevel === 'High').length
+      };
+    });
+  }, [patients, riskAssessments]);
+
+  // Gender distribution from real patient data
+  const genderDistribution = useMemo(() => {
+    const male = patients.filter(p => p.gender === 'Male').length;
+    const female = patients.filter(p => p.gender === 'Female').length;
+    const other = patients.filter(p => p.gender === 'Other').length;
+    const total = patients.length || 1;
+
+    return {
+      male: { count: male, percentage: Math.round((male / total) * 100) },
+      female: { count: female, percentage: Math.round((female / total) * 100) },
+      other: { count: other, percentage: Math.round((other / total) * 100) }
+    };
+  }, [patients]);
+
+  // Average age by risk level
+  const averageAgeByRisk = useMemo(() => {
+    const riskLevels: ('Low' | 'Moderate' | 'High')[] = ['Low', 'Moderate', 'High'];
+    
+    return riskLevels.reduce((acc, level) => {
+      const assessments = riskAssessments.filter(r => r.riskLevel === level);
+      const patientIds = assessments.map(a => a.patientId);
+      const patientsWithRisk = patients.filter(p => patientIds.includes(p.id));
+      
+      if (patientsWithRisk.length > 0) {
+        const totalAge = patientsWithRisk.reduce((sum, p) => sum + p.age, 0);
+        acc[level] = (totalAge / patientsWithRisk.length).toFixed(1);
+      } else {
+        acc[level] = 'N/A';
+      }
+      
+      return acc;
+    }, {} as Record<string, string>);
+  }, [patients, riskAssessments]);
+
+  // High risk patients
+  const highRiskPatients = useMemo(() => {
+    const highRiskAssessments = riskAssessments.filter(r => r.riskLevel === 'High');
+    const highRiskPatientIds = [...new Set(highRiskAssessments.map(r => r.patientId))];
+    return patients.filter(p => highRiskPatientIds.includes(p.id)).slice(0, 5);
+  }, [patients, riskAssessments]);
 
   // Risk distribution colors
   const riskColors = {
@@ -39,40 +181,46 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
     { name: 'High Risk', value: analytics.riskDistribution.high, color: riskColors.high }
   ];
 
-  // Sample data for age group analysis
-  const ageGroupData = [
-    { group: '18-30', low: 45, moderate: 12, high: 3 },
-    { group: '31-45', low: 78, moderate: 28, high: 8 },
-    { group: '46-60', low: 92, moderate: 45, high: 15 },
-    { group: '61-75', low: 65, moderate: 38, high: 22 },
-    { group: '75+', low: 34, moderate: 28, high: 18 }
-  ];
+  // Monthly activity trends
+  const monthlyActivityTrends = useMemo(() => {
+    const now = new Date();
+    const trends = [];
 
-  // Sample data for monthly trends
-  const monthlyTrends = [
-    { month: 'Jan', newPatients: 12, assessments: 45, highRisk: 8 },
-    { month: 'Feb', newPatients: 15, assessments: 52, highRisk: 12 },
-    { month: 'Mar', newPatients: 8, assessments: 38, highRisk: 6 },
-    { month: 'Apr', newPatients: 18, assessments: 63, highRisk: 15 },
-    { month: 'May', newPatients: 22, assessments: 71, highRisk: 18 },
-    { month: 'Jun', newPatients: 19, assessments: 58, highRisk: 14 }
-  ];
+    for (let i = 5; i >= 0; i--) {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const monthName = monthDate.toLocaleDateString('en-US', { month: 'short' });
+
+      const newPatients = patients.filter(p => {
+        const createdDate = new Date(p.createdAt);
+        return createdDate >= monthDate && createdDate < nextMonthDate;
+      }).length;
+
+      const assessments = riskAssessments.filter(r => {
+        const assessmentDate = new Date(r.date);
+        return assessmentDate >= monthDate && assessmentDate < nextMonthDate;
+      }).length;
+
+      const highRisk = riskAssessments.filter(r => {
+        const assessmentDate = new Date(r.date);
+        return assessmentDate >= monthDate && assessmentDate < nextMonthDate && r.riskLevel === 'High';
+      }).length;
+
+      trends.push({
+        month: monthName,
+        newPatients,
+        assessments,
+        highRisk
+      });
+    }
+
+    return trends;
+  }, [patients, riskAssessments]);
 
   const exportReport = (format: string) => {
-    // Simulate report generation
     const fileName = `clinitrack-analytics-${new Date().toISOString().split('T')[0]}.${format}`;
     console.log(`Generating ${format.toUpperCase()} report: ${fileName}`);
-    
-    // In a real application, this would trigger actual file download
     alert(`${format.toUpperCase()} report would be downloaded as: ${fileName}`);
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
   };
 
   return (
@@ -165,13 +313,13 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Follow-up Alerts</p>
-                <p className="text-3xl font-bold">{analytics.followUpAlerts}</p>
+                <p className="text-sm font-medium text-muted-foreground">Cancer-Free</p>
+                <p className="text-3xl font-bold">{analytics.cancerFreePatients}</p>
               </div>
-              <Bell className="h-8 w-8 text-red-500" />
+              <Bell className="h-8 w-8 text-teal-500" />
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              Due within 30 days
+              Successfully treated
             </p>
           </CardContent>
         </Card>
@@ -195,25 +343,31 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardDescription>Current patient risk levels</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={riskDistributionData}
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={80}
-                        dataKey="value"
-                        label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
-                      >
-                        {riskDistributionData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
+                {riskDistributionData.some(d => d.value > 0) ? (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={riskDistributionData}
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          dataKey="value"
+                          label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
+                        >
+                          {riskDistributionData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-80 flex items-center justify-center text-muted-foreground">
+                    No risk assessment data available
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -224,19 +378,25 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardDescription>Monthly status distribution</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={analytics.statusTrends}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="ongoing" stackId="1" stroke="#8884d8" fill="#8884d8" />
-                      <Area type="monotone" dataKey="recurrence" stackId="1" stroke="#82ca9d" fill="#82ca9d" />
-                      <Area type="monotone" dataKey="cancerFree" stackId="1" stroke="#ffc658" fill="#ffc658" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+                {analytics.monthlyTrends.some(t => t.ongoing > 0 || t.recurrence > 0 || t.cancerFree > 0) ? (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={analytics.monthlyTrends}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="ongoing" stackId="1" stroke="#8884d8" fill="#8884d8" name="Ongoing" />
+                        <Area type="monotone" dataKey="recurrence" stackId="1" stroke="#82ca9d" fill="#82ca9d" name="Recurrence" />
+                        <Area type="monotone" dataKey="cancerFree" stackId="1" stroke="#ffc658" fill="#ffc658" name="Cancer-Free" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-80 flex items-center justify-center text-muted-foreground">
+                    No trend data available yet
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -248,25 +408,31 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
               <CardDescription>Frequently reported symptoms across all patients</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {analytics.commonSymptoms.map((symptom, index) => (
-                  <div key={symptom.symptom} className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <span className="text-sm font-medium text-muted-foreground">#{index + 1}</span>
-                      <span className="font-medium">{symptom.symptom}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-24 bg-muted rounded-full h-2">
-                        <div 
-                          className="bg-primary h-2 rounded-full" 
-                          style={{ width: `${(symptom.count / analytics.commonSymptoms[0].count) * 100}%` }}
-                        />
+              {analytics.commonSymptoms.length > 0 ? (
+                <div className="space-y-4">
+                  {analytics.commonSymptoms.map((symptom, index) => (
+                    <div key={symptom.symptom} className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <span className="text-sm font-medium text-muted-foreground">#{index + 1}</span>
+                        <span className="font-medium">{symptom.symptom}</span>
                       </div>
-                      <Badge variant="secondary">{symptom.count}</Badge>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-24 bg-muted rounded-full h-2">
+                          <div 
+                            className="bg-primary h-2 rounded-full" 
+                            style={{ width: `${(symptom.count / analytics.commonSymptoms[0].count) * 100}%` }}
+                          />
+                        </div>
+                        <Badge variant="secondary">{symptom.count}</Badge>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No symptom data available yet
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -280,19 +446,25 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardDescription>Risk levels across different age demographics</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={ageGroupData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="group" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="low" stackId="a" fill={riskColors.low} />
-                      <Bar dataKey="moderate" stackId="a" fill={riskColors.moderate} />
-                      <Bar dataKey="high" stackId="a" fill={riskColors.high} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                {ageGroupData.some(d => d.low > 0 || d.moderate > 0 || d.high > 0) ? (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={ageGroupData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="group" />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="low" stackId="a" fill={riskColors.low} name="Low" />
+                        <Bar dataKey="moderate" stackId="a" fill={riskColors.moderate} name="Moderate" />
+                        <Bar dataKey="high" stackId="a" fill={riskColors.high} name="High" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-80 flex items-center justify-center text-muted-foreground">
+                    No age group data available
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -306,17 +478,23 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardDescription>Patients requiring immediate attention</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {patients.slice(0, 5).map((patient, index) => (
-                    <div key={patient.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <p className="font-medium">{patient.name}</p>
-                        <p className="text-sm text-muted-foreground">{patient.age} years, {patient.gender}</p>
+                {highRiskPatients.length > 0 ? (
+                  <div className="space-y-3">
+                    {highRiskPatients.map((patient) => (
+                      <div key={patient.id} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div>
+                          <p className="font-medium">{patient.name}</p>
+                          <p className="text-sm text-muted-foreground">{patient.age} years, {patient.gender}</p>
+                        </div>
+                        <Badge variant="destructive">High Risk</Badge>
                       </div>
-                      <Badge variant="destructive">High Risk</Badge>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No high-risk patients identified
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -329,19 +507,25 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
               <CardDescription>Patient registrations, assessments, and high-risk cases over time</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyTrends}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="newPatients" stroke="#8884d8" strokeWidth={2} />
-                    <Line type="monotone" dataKey="assessments" stroke="#82ca9d" strokeWidth={2} />
-                    <Line type="monotone" dataKey="highRisk" stroke="#ff7300" strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              {monthlyActivityTrends.some(t => t.newPatients > 0 || t.assessments > 0 || t.highRisk > 0) ? (
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monthlyActivityTrends}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="newPatients" stroke="#8884d8" strokeWidth={2} name="New Patients" />
+                      <Line type="monotone" dataKey="assessments" stroke="#82ca9d" strokeWidth={2} name="Assessments" />
+                      <Line type="monotone" dataKey="highRisk" stroke="#ff7300" strokeWidth={2} name="High Risk" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-80 flex items-center justify-center text-muted-foreground">
+                  No activity trend data available yet
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -353,26 +537,43 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardTitle>Gender Distribution</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span>Female</span>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-32 bg-muted rounded-full h-2">
-                        <div className="bg-pink-500 h-2 rounded-full" style={{ width: '58%' }} />
+                {patients.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span>Female</span>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-32 bg-muted rounded-full h-2">
+                          <div className="bg-pink-500 h-2 rounded-full" style={{ width: `${genderDistribution.female.percentage}%` }} />
+                        </div>
+                        <span className="text-sm">{genderDistribution.female.percentage}%</span>
                       </div>
-                      <span className="text-sm">58%</span>
                     </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Male</span>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-32 bg-muted rounded-full h-2">
-                        <div className="bg-blue-500 h-2 rounded-full" style={{ width: '42%' }} />
+                    <div className="flex items-center justify-between">
+                      <span>Male</span>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-32 bg-muted rounded-full h-2">
+                          <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${genderDistribution.male.percentage}%` }} />
+                        </div>
+                        <span className="text-sm">{genderDistribution.male.percentage}%</span>
                       </div>
-                      <span className="text-sm">42%</span>
                     </div>
+                    {genderDistribution.other.count > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span>Other</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-32 bg-muted rounded-full h-2">
+                            <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${genderDistribution.other.percentage}%` }} />
+                          </div>
+                          <span className="text-sm">{genderDistribution.other.percentage}%</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No patient data available
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -381,20 +582,26 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardTitle>Average Age by Risk Level</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span>Low Risk</span>
-                    <Badge variant="default">45.2 years</Badge>
+                {riskAssessments.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span>Low Risk</span>
+                      <Badge variant="default">{averageAgeByRisk.Low} years</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Moderate Risk</span>
+                      <Badge variant="secondary">{averageAgeByRisk.Moderate} years</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>High Risk</span>
+                      <Badge variant="destructive">{averageAgeByRisk.High} years</Badge>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span>Moderate Risk</span>
-                    <Badge variant="secondary">52.8 years</Badge>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No risk assessment data available
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span>High Risk</span>
-                    <Badge variant="destructive">61.3 years</Badge>
-                  </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </div>

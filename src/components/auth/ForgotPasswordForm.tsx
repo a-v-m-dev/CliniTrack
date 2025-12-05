@@ -6,6 +6,7 @@ import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Alert, AlertDescription } from '../ui/alert';
 import { ArrowLeft, Loader2, Mail, CheckCircle } from 'lucide-react';
+import { useEmailService } from '../../hooks/useEmailService';
 
 // Initialize PouchDB
 const db = new PouchDB('CliniTrack');
@@ -24,85 +25,46 @@ interface UserRecord {
   createdAt: string;
 }
 
-interface PasswordResetToken {
-  _id: string;
-  type: 'password_reset_token';
-  email: string;
-  token: string;
-  expiresAt: string;
-  used: boolean;
-  createdAt: string;
-}
-
 export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
+  // Use EmailJS hook
+  const { sendPasswordResetEmail, isLoading, error: emailError, clearError } = useEmailService();
+
   const generateResetToken = (): string => {
-    // Generate a secure random token
     return Math.random().toString(36).substring(2, 15) + 
            Math.random().toString(36).substring(2, 15) +
            Date.now().toString(36);
   };
 
-  const sendResetEmail = async (email: string, token: string): Promise<boolean> => {
-    // In a real implementation, this would send an actual email
-    // For now, we'll simulate email sending and store the token in PouchDB
-    
-    const resetToken: PasswordResetToken = {
-      _id: `reset_token_${token}`,
-      type: 'password_reset_token',
-      email: email,
-      token: token,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
-      used: false,
-      createdAt: new Date().toISOString()
-    };
-
-    try {
-      await db.put(resetToken);
-      console.log(`Password reset token generated for ${email}: ${token}`);
-      
-      // Simulate email delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return true;
-    } catch (error) {
-      console.error('Failed to save reset token:', error);
-      return false;
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setLocalError('');
     setMessage('');
-    setIsLoading(true);
+    clearError();
 
     if (!email) {
-      setError('Please enter your email address');
-      setIsLoading(false);
+      setLocalError('Please enter your email address');
       return;
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setError('Please enter a valid email address');
-      setIsLoading(false);
+      setLocalError('Please enter a valid email address');
       return;
     }
 
     try {
-      // Check if user exists in local database
+      // Check if user exists
       let userExists = false;
       let userName = '';
 
       try {
         const userDocId = `user_${email}`;
-        const userDoc = await db.get<UserRecord>(userDocId);
+        const userDoc = await db.get(userDocId) as UserRecord;
         
         if (userDoc && userDoc.type === 'user') {
           userExists = true;
@@ -115,29 +77,46 @@ export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
       }
 
       if (!userExists) {
-        // Don't reveal whether email exists or not for security
+        // Security: Don't reveal if email exists
         setMessage('If an account with this email exists, password reset instructions have been sent.');
         setSubmitted(true);
-        setIsLoading(false);
         return;
       }
 
-      // Generate and send reset token
+      // Generate reset token and link
       const resetToken = generateResetToken();
-      const emailSent = await sendResetEmail(email, resetToken);
+      const resetLink = `${window.location.origin}/reset-password?token=${resetToken}`;
 
-      if (emailSent) {
-        setMessage(`Password reset instructions have been sent to ${email}. The reset link will expire in 24 hours.`);
+      // Store token in PouchDB
+      const resetTokenDoc = {
+        _id: `reset_token_${resetToken}`,
+        type: 'password_reset_token',
+        email: email,
+        token: resetToken,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        used: false,
+        createdAt: new Date().toISOString()
+      };
+
+      await db.put(resetTokenDoc);
+
+      // 🔥 Send email using EmailJS
+      const emailResult = await sendPasswordResetEmail({
+        to: email,
+        name: userName,
+        resetLink: resetLink
+      });
+
+      if (emailResult.success) {
+        setMessage(`Password reset instructions have been sent to ${email}. Check your inbox!`);
         setSubmitted(true);
       } else {
-        setError('Failed to send reset email. Please try again.');
+        setLocalError(emailResult.error || 'Failed to send reset email. Please try again.');
       }
 
     } catch (err) {
       console.error('Password reset error:', err);
-      setError('An unexpected error occurred. Please try again.');
-    } finally {
-      setIsLoading(false);
+      setLocalError('An unexpected error occurred. Please try again.');
     }
   };
 
@@ -145,8 +124,11 @@ export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
     setSubmitted(false);
     setEmail('');
     setMessage('');
-    setError('');
+    setLocalError('');
+    clearError();
   };
+
+  const displayError = localError || emailError;
 
   return (
     <Card className="w-full max-w-md mx-auto">
@@ -172,9 +154,9 @@ export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
               />
             </div>
 
-            {error && (
+            {displayError && (
               <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>{displayError}</AlertDescription>
               </Alert>
             )}
 
@@ -232,10 +214,10 @@ export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
         </div>
 
         {!submitted && (
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> This will generate a password reset token stored in your local database. 
-              In a production environment, this would send an actual email with a secure reset link.
+          <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+            <p className="text-xs text-green-700">
+              <strong>Powered by EmailJS:</strong> Real emails will be sent instantly. 
+              No backend setup required!
             </p>
           </div>
         )}

@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Search, User, Calendar, FileText, Activity, AlertTriangle, Clock } from 'lucide-react';
+import { Search, User, Calendar, FileText, Activity, AlertTriangle, Clock, ImageIcon, Trash2 } from 'lucide-react';
 import { Patient, LabResult, Visit, RiskAssessment } from '../../types';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Separator } from '../ui/separator';
+import PouchDB from 'pouchdb-browser';
 
 interface PatientProfilesProps {
   patients: Patient[];
@@ -16,9 +17,74 @@ interface PatientProfilesProps {
   riskAssessments: RiskAssessment[];
 }
 
+interface StoredLabResult {
+  _id: string;
+  type: 'labResult';
+  patientId: string;
+  name: string;
+  fileType: string;
+  fileName: string;
+  fileSize: number;
+  fileData: string;
+  date: string;
+  uploadedBy: string;
+  labType?: string;
+}
+
 export function PatientProfiles({ patients, labResults, visits, riskAssessments }: PatientProfilesProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [patientLabFiles, setPatientLabFiles] = useState<StoredLabResult[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const db = new PouchDB('CliniTrack');
+
+  //new
+  useEffect(() => {
+    const fetchPatientLabFiles = async () => {
+      if (!selectedPatient) return;
+
+      try {
+        const allDocs = await db.allDocs({ include_docs: true });
+        const labFiles = allDocs.rows
+          .map((row: { doc: any; }) => row.doc)
+          .filter((doc: any) => doc?.type === 'labResult' && doc.patientId === selectedPatient.id) as StoredLabResult[];
+
+        setPatientLabFiles(labFiles);
+      } catch (err) {
+        console.error('Failed to fetch lab files:', err);
+      }
+    };
+
+    fetchPatientLabFiles();
+  }, [selectedPatient]);
+
+  //new
+  const getBase64ImageSrc = (fileData: string, fileType: string) => {
+    return `data:${fileType};base64,${fileData}`;
+  };
+
+  //new
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+  //new
+  const handleDeleteLabFile = async (labFileId: string) => {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+
+    try {
+      const doc = await db.get(labFileId);
+      await db.remove(doc);
+
+      setPatientLabFiles(prev => prev.filter(f => f._id !== labFileId));
+      console.log('✅ Lab file deleted from PouchDB');
+    } catch (err) {
+      console.error('Failed to delete lab file:', err);
+    }
+  };
 
   const filteredPatients = patients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -117,7 +183,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                   const latestRisk = getLatestRiskAssessment(patient.id);
                   const lastVisit = patientVisits[0];
                   const followUpDue = lastVisit && isFollowUpDue(lastVisit.date);
-                  
+
                   return (
                     <Card key={patient.id} className="cursor-pointer hover:shadow-md transition-shadow">
                       <CardContent className="pt-4">
@@ -143,7 +209,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                 </Badge>
                               )}
                             </div>
-                            
+
                             <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground">
                               <div>Email: {patient.email}</div>
                               <div>Phone: {patient.phone}</div>
@@ -194,7 +260,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                   Complete medical record and visit history
                                 </DialogDescription>
                               </DialogHeader>
-                              
+
                               {selectedPatient && (
                                 <Tabs defaultValue="overview" className="space-y-4">
                                   <TabsList className="grid w-full grid-cols-4">
@@ -244,7 +310,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                               )}
                                             </div>
                                           </div>
-                                          
+
                                           <div>
                                             <strong className="text-sm">Allergies:</strong>
                                             <div className="flex flex-wrap gap-1 mt-1">
@@ -295,13 +361,73 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                               </div>
                                             </div>
                                           ))}
-                                          
+
                                           {getPatientVisits(selectedPatient.id).length === 0 && (
                                             <p className="text-muted-foreground text-sm">No visits recorded</p>
                                           )}
                                         </div>
                                       </CardContent>
                                     </Card>
+                                    {/* new */}
+                                    <div className='space-y-4'>
+                                      <h3 className="font-medium">Lab/Imaging Files ({patientLabFiles.length})</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                      {patientLabFiles.map((labFile) => {
+                                        const isImage = labFile.fileType.startsWith('image/');
+
+                                        return (
+                                          <Card key={labFile._id} className="overflow-hidden">
+                                            {isImage ? (
+                                              <div
+                                                className="aspect-video bg-muted cursor-pointer relative group"
+                                                onClick={() => setSelectedImage(getBase64ImageSrc(labFile.fileData, labFile.fileType))}
+                                              >
+                                                <img
+                                                  src={getBase64ImageSrc(labFile.fileData, labFile.fileType)}
+                                                  alt={labFile.name}
+                                                  className="w-full h-full object-cover"
+                                                />
+                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                  <ImageIcon className="h-8 w-8 text-white" />
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <div className="aspect-video bg-muted flex items-center justify-center">
+                                                <FileText className="h-12 w-12 text-muted-foreground" />
+                                              </div>
+                                            )}
+
+                                            <CardContent className="p-3">
+                                              <div className="space-y-2">
+                                                <div>
+                                                  <p className="font-medium text-sm truncate">{labFile.name}</p>
+                                                  <p className="text-xs text-muted-foreground">{formatDate(labFile.date)}</p>
+                                                </div>
+                                                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                  <span>{formatFileSize(labFile.fileSize)}</span>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-6 px-2"
+                                                    onClick={() => handleDeleteLabFile(labFile._id)}
+                                                  >
+                                                    <Trash2 className="h-3 w-3" />
+                                                  </Button>
+                                                </div>
+                                                <p className="text-xs">Uploaded by: {labFile.uploadedBy}</p>
+                                              </div>
+                                            </CardContent>
+                                          </Card>
+                                        );
+                                      })}
+
+                                      {patientLabFiles.length === 0 && (
+                                        <div className="col-span-full text-center py-8 text-muted-foreground text-sm">
+                                          No lab files uploaded yet
+                                        </div>
+                                      )}
+                                    </div>
+                                    </div>
                                   </TabsContent>
 
                                   <TabsContent value="visits" className="space-y-4">
@@ -323,17 +449,17 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                 ))}
                                               </div>
                                             </div>
-                                            
+
                                             <div>
                                               <strong className="text-sm">Diagnosis:</strong>
                                               <p className="text-sm mt-1">{visit.diagnosis}</p>
                                             </div>
-                                            
+
                                             <div>
                                               <strong className="text-sm">Treatment:</strong>
                                               <p className="text-sm mt-1">{visit.treatment}</p>
                                             </div>
-                                            
+
                                             {visit.notes && (
                                               <div>
                                                 <strong className="text-sm">Notes:</strong>
@@ -343,7 +469,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                           </CardContent>
                                         </Card>
                                       ))}
-                                      
+
                                       {getPatientVisits(selectedPatient.id).length === 0 && (
                                         <div className="text-center py-8">
                                           <Calendar className="mx-auto h-12 w-12 text-muted-foreground" />
@@ -375,7 +501,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                   {result.results}
                                                 </pre>
                                               </div>
-                                              
+
                                               {result.file && (
                                                 <div>
                                                   <strong className="text-sm">Attached File:</strong>
@@ -387,7 +513,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                   </div>
                                                 </div>
                                               )}
-                                              
+
                                               <p className="text-xs text-muted-foreground">
                                                 Uploaded by {result.uploadedBy}
                                               </p>
@@ -395,7 +521,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                           </CardContent>
                                         </Card>
                                       ))}
-                                      
+
                                       {getPatientLabResults(selectedPatient.id).length === 0 && (
                                         <div className="text-center py-8">
                                           <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
@@ -472,7 +598,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                           </CardContent>
                                         </Card>
                                       ))}
-                                      
+
                                       {getPatientRiskAssessments(selectedPatient.id).length === 0 && (
                                         <div className="text-center py-8">
                                           <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground" />
@@ -496,6 +622,24 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
           </div>
         </CardContent>
       </Card>
+
+      {/* Image Preview Modal */}
+      {selectedImage && (
+        <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Image Preview</DialogTitle>
+            </DialogHeader>
+            <div className="relative">
+              <img
+                src={selectedImage}
+                alt="Lab result preview"
+                className="w-full h-auto max-h-[70vh] object-contain"
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

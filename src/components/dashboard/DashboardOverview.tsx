@@ -1,14 +1,15 @@
 import React from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { 
-  Users, UserPlus, Activity, AlertTriangle, Calendar, 
-  TrendingUp, Clock, Bell, FileText 
+import {
+  Users, UserPlus, Activity, AlertTriangle, Calendar,
+  TrendingUp, Clock, Bell, FileText
 } from 'lucide-react';
 import { Patient, LabResult, Visit, RiskAssessment } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
-
+import PouchDB from 'pouchdb-browser';
 interface DashboardOverviewProps {
   patients: Patient[];
   labResults: LabResult[];
@@ -17,14 +18,100 @@ interface DashboardOverviewProps {
   onViewChange: (view: string) => void;
 }
 
-export function DashboardOverview({ 
-  patients, 
-  labResults, 
-  visits, 
-  riskAssessments, 
-  onViewChange 
+//new
+interface StoredLabResult {
+  _id: string;
+  type: 'labResult';
+  patientId: string;
+  date: string;
+}
+
+//new Activity Log Interface
+interface ActivityLog {
+  _id: string;
+  type: 'activity';
+  activityType: 'patient_edit' | 'lab_upload';
+  patientId: string;
+  patientName: string;
+  labType?: string;
+  labFileName?: string;
+  performedBy: string;
+  timestamp: string;
+  details?: string;
+}
+
+
+export function DashboardOverview({
+  patients,
+  labResults,
+  visits,
+  riskAssessments,
+  onViewChange
 }: DashboardOverviewProps) {
   const { user } = useAuth();
+  //new
+  const [labFilesCount, setLabFilesCount] = useState(0);
+  const [recentLabFilesCount, setRecentLabFilesCount] = useState(0);
+  const [recentActivities, setRecentActivities] = useState<ActivityLog[]>([]);
+  const db = new PouchDB('CliniTrack');
+
+  // Fetch lab files count from PouchDB
+  useEffect(() => {
+    const fetchLabFilesCount = async () => {
+      try {
+        const allDocs = await db.allDocs({ include_docs: true });
+        const labFiles = allDocs.rows
+          .map((row: { doc: any; }) => row.doc)
+          .filter((doc: any) => doc?.type === 'labResult') as StoredLabResult[];
+
+        setLabFilesCount(labFiles.length);
+
+        // Count recent lab files (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const recentFiles = labFiles.filter(file =>
+          new Date(file.date) > thirtyDaysAgo
+        );
+
+        setRecentLabFilesCount(recentFiles.length);
+      } catch (err) {
+        console.error('Failed to fetch lab files count:', err);
+      }
+    };
+
+    fetchLabFilesCount();
+  }, [patients]); // Re-fetch when patients change
+
+
+  // new Fetch recent activities from PouchDB
+  useEffect(() => {
+    const fetchRecentActivities = async () => {
+      try {
+        const allDocs = await db.allDocs({ include_docs: true });
+        const activities = allDocs.rows
+          .map((row: { doc: any; }) => row.doc)
+          .filter((doc: any) => doc?.type === 'activity') as ActivityLog[];
+
+        // Sort by timestamp (most recent first) and take top 5
+        const sortedActivities = activities
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 2);
+
+        setRecentActivities(sortedActivities);
+      } catch (err) {
+        console.error('Failed to fetch recent activities:', err);
+      }
+    };
+
+    fetchRecentActivities();
+
+    // Set up interval to refresh activities every 30 seconds
+    const interval = setInterval(fetchRecentActivities, 30000);
+
+    return () => clearInterval(interval);
+  }, [patients]); // Re-fetch when patients change
+
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -33,6 +120,17 @@ export function DashboardOverview({
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  // new
+  const getLabTypeBadgeVariant = (labType: string) => {
+    switch (labType) {
+      case 'Blood Test': return 'default';
+      case 'Imaging': return 'secondary';
+      case 'Biopsy': return 'destructive';
+      case 'Urine Test': return 'outline';
+      default: return 'outline';
+    }
   };
 
   // Calculate metrics
@@ -57,11 +155,11 @@ export function DashboardOverview({
   const followUpAlerts = patients.filter(patient => {
     const patientVisits = visits.filter(v => v.patientId === patient.id);
     if (patientVisits.length === 0) return true;
-    
+
     const lastVisit = patientVisits.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-    
+
     return new Date(lastVisit.date) < threeMonthsAgo;
   });
 
@@ -75,8 +173,8 @@ export function DashboardOverview({
     },
     {
       title: 'Recent Lab Uploads',
-      value: recentLabResults.length.toString(),
-      subtitle: 'Last 5 uploads',
+      value: labFilesCount.toString(),
+      subtitle: `${recentLabFilesCount} recent uploads`,
       icon: FileText,
       color: 'text-accent'
     },
@@ -182,54 +280,73 @@ export function DashboardOverview({
           <CardContent>
             <div className="space-y-3">
               {user?.role === 'secretary' ? (
-                recentLabResults.length > 0 ? (
-                  recentLabResults.map((result) => {
-                    const patient = patients.find(p => p.id === result.patientId);
-                    return (
-                      <div key={result.id} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{result.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {patient?.name} • {formatDate(result.date)}
-                          </p>
-                        </div>
-                        <Badge variant="outline" className="text-xs">{result.type}</Badge>
+                /* ————————————— SECRETARY ORIGINAL CODE ————————————— */
+                recentActivities.length > 0 ? (
+                  recentActivities.map((activity) => (
+                    <div key={activity._id} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">
+                          {activity.activityType === 'patient_edit'
+                            ? `Edited ${activity.patientName}'s profile`
+                            : activity.labFileName || 'Lab file uploaded'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {activity.patientName} • {formatDate(activity.timestamp)}
+                        </p>
                       </div>
-                    );
-                  })
+                      {activity.activityType === 'lab_upload' && activity.labType && (
+                        <Badge variant={getLabTypeBadgeVariant(activity.labType)} className="text-xs">
+                          {activity.labType}
+                        </Badge>
+                      )}
+                      {activity.activityType === 'patient_edit' && (
+                        <Badge variant="outline" className="text-xs">
+                          Edit
+                        </Badge>
+                      )}
+                    </div>
+                  ))
                 ) : (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    No recent lab uploads
+                    No recent activity
                   </p>
                 )
               ) : (
-                recentVisits.length > 0 ? (
-                  recentVisits.map((visit) => {
-                    const patient = patients.find(p => p.id === visit.patientId);
-                    const riskAssessment = riskAssessments.find(r => r.visitId === visit.id);
-                    return (
-                      <div key={visit.id} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{patient?.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {visit.diagnosis} • {formatDate(visit.date)}
-                          </p>
-                        </div>
-                        {riskAssessment && (
-                          <Badge 
-                            variant={riskAssessment.riskLevel === 'High' ? 'destructive' : 
-                                    riskAssessment.riskLevel === 'Moderate' ? 'secondary' : 'default'}
+                /* ————————————— DOCTOR VERSION ————————————— */
+                riskAssessments.length > 0 ? (
+                  riskAssessments
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .slice(0, 3) // show latest 5
+                    .map((assessment) => {
+                      const patient = patients.find(p => p.id === assessment.patientId);
+
+                      return (
+                        <div key={assessment.id} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div className="flex-1">
+                            <p className="font-medium text-sm">{patient?.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Assessment • {formatDate(assessment.date)}
+                            </p>
+                          </div>
+
+                          <Badge
+                            variant={
+                              assessment.riskLevel === 'High'
+                                ? 'destructive'
+                                : assessment.riskLevel === 'Moderate'
+                                  ? 'secondary'
+                                  : 'default'
+                            }
                             className="text-xs"
                           >
-                            {riskAssessment.riskLevel}
+                            {assessment.riskLevel}
                           </Badge>
-                        )}
-                      </div>
-                    );
-                  })
+                        </div>
+                      );
+                    })
                 ) : (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    No recent visits
+                    No recent assessments
                   </p>
                 )
               )}
@@ -260,24 +377,24 @@ export function DashboardOverview({
           <CardContent>
             {user?.role === 'secretary' ? (
               <div className="space-y-3">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => onViewChange('new-patient')}
                 >
                   <UserPlus className="h-4 w-4 mr-2" />
                   Register New Patient
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => onViewChange('existing-patient')}
                 >
                   <Users className="h-4 w-4 mr-2" />
                   Search Existing Patients
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => onViewChange('existing-patient')}
                 >
@@ -295,8 +412,8 @@ export function DashboardOverview({
                         {followUpAlerts.length} patients need follow-up
                       </p>
                     </div>
-                    <Button 
-                      variant="link" 
+                    <Button
+                      variant="link"
                       className="p-0 h-auto text-orange-600 text-xs"
                       onClick={() => onViewChange('patients')}
                     >
@@ -313,8 +430,8 @@ export function DashboardOverview({
                         {highRiskPatients} high-risk patients
                       </p>
                     </div>
-                    <Button 
-                      variant="link" 
+                    <Button
+                      variant="link"
                       className="p-0 h-auto text-red-600 text-xs"
                       onClick={() => onViewChange('patients')}
                     >
@@ -330,8 +447,8 @@ export function DashboardOverview({
                       Monthly analytics available
                     </p>
                   </div>
-                  <Button 
-                    variant="link" 
+                  <Button
+                    variant="link"
                     className="p-0 h-auto text-blue-600 text-xs"
                     onClick={() => onViewChange('analytics')}
                   >
@@ -352,8 +469,8 @@ export function DashboardOverview({
               <Users className="h-5 w-5" />
               <span>Recent Patients</span>
             </CardTitle>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               onClick={() => onViewChange(user?.role === 'secretary' ? 'existing-patient' : 'patients')}
             >
@@ -366,45 +483,55 @@ export function DashboardOverview({
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {patients.slice(0, 5).map((patient) => {
-              const latestRisk = riskAssessments
-                .filter(r => r.patientId === patient.id)
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-              
-              return (
-                <div key={patient.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium">{patient.name}</p>
-                      <Badge variant="outline" className="text-xs">
-                        {patient.age}y, {patient.gender}
-                      </Badge>
+            {[...patients]
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .slice(0, 5)
+              .map((patient) => {
+                const latestRisk = riskAssessments
+                  .filter(r => r.patientId === patient.id)
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+
+                return (
+                  <div key={patient.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2">
+                        <p className="font-medium">{patient.name}</p>
+                        <Badge variant="outline" className="text-xs">
+                          {patient.age}y, {patient.gender}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {patient.email} • Added {formatDate(patient.createdAt)}
+                      </p>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {patient.email} • Added {formatDate(patient.createdAt)}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    {latestRisk && (
-                      <Badge 
-                        variant={latestRisk.riskLevel === 'High' ? 'destructive' : 
-                                latestRisk.riskLevel === 'Moderate' ? 'secondary' : 'default'}
-                        className="text-xs"
+                    <div className="flex items-center space-x-2">
+                      {latestRisk && (
+                        <Badge
+                          variant={
+                            latestRisk.riskLevel === 'High'
+                              ? 'destructive'
+                              : latestRisk.riskLevel === 'Moderate'
+                                ? 'secondary'
+                                : 'default'
+                          }
+                          className="text-xs"
+                        >
+                          {latestRisk.riskLevel}
+                        </Badge>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          onViewChange(user?.role === 'secretary' ? 'existing-patient' : 'patients')
+                        }
                       >
-                        {latestRisk.riskLevel}
-                      </Badge>
-                    )}
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => onViewChange(user?.role === 'secretary' ? 'existing-patient' : 'patients')}
-                    >
-                      View
-                    </Button>
+                        View
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </CardContent>
       </Card>

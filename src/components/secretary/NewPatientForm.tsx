@@ -40,39 +40,71 @@ export function NewPatientForm({ onPatientCreated }: NewPatientFormProps) {
     weight: '',
     height: ''
   });
-  
+
   const [uploadedFiles, setUploadedFiles] = useState<Array<{
     id: string;
     name: string;
     type: string;
     size: number;
+    file: File
+    preview?: string
   }>>([]);
-  
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-const handleInputChange = (field: string, value: string | number | boolean) => {
-  setFormData(prev => ({ ...prev, [field]: value }));
-};
+  const handleInputChange = (field: string, value: string | number | boolean) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
 
-    Array.from(files).forEach(file => {
+    // Array.from(files).forEach(file => {
+    //   const newFile = {
+    //     id: Math.random().toString(36).substr(2, 9),
+    //     name: file.name,
+    //     type: file.type,
+    //     size: file.size
+    //   };
+    //   setUploadedFiles(prev => [...prev, newFile]);
+    // });
+
+    // new
+    for (const file of Array.from(files)) {
+      let preview: string | undefined
+      if (file.type.startsWith('image/')) {
+        preview = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.readAsDataURL(file)
+        })
+      }
+
       const newFile = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: Math.random().toString(36).substring(2, 9),
         name: file.name,
         type: file.type,
-        size: file.size
-      };
-      setUploadedFiles(prev => [...prev, newFile]);
-    });
+        size: file.size,
+        file,
+        preview
+      }
+      setUploadedFiles(prev => [...prev, newFile])
+    }
   };
 
   const removeFile = (fileId: string) => {
-    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+    // setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+    //new
+    setUploadedFiles(prev => {
+      const file = prev.find(f => f.id === fileId)
+      if (file?.preview) {
+        URL.revokeObjectURL(file.preview)
+      }
+      return prev.filter(f => f.id !== fileId)
+    })
   };
 
   const formatFileSize = (bytes: number) => {
@@ -144,6 +176,32 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
         });
 
         console.log('✅ Patient saved locally to PouchDB:', newPatient.name);
+
+        // Save uploaded files as attachments or separate lab result documents
+        for (const uploadedFile of uploadedFiles) {
+          const fileData = await uploadedFile.file.arrayBuffer();
+          const base64Data = btoa(
+            new Uint8Array(fileData).reduce((data, byte) => data + String.fromCharCode(byte), '')
+          );
+
+          const labResultId = `lab_${newPatient.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+          await db.put({
+            _id: labResultId,
+            type: 'labResult',
+            patientId: newPatient.id,
+            name: uploadedFile.name,
+            fileType: uploadedFile.type,
+            fileName: uploadedFile.name,
+            fileSize: uploadedFile.size,
+            fileData: base64Data,
+            date: new Date().toISOString(),
+            uploadedBy: 'Secretary'
+          });
+
+          console.log('✅ File saved to PouchDB:', uploadedFile.name);
+        }
+
       } catch (err) {
         console.error('❌ Failed to save to PouchDB:', err);
       }
@@ -236,7 +294,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="age">Age *</Label>
                   <Input
@@ -250,7 +308,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="gender">Gender *</Label>
                   <Select value={formData.gender} onValueChange={(value: string) => handleInputChange('gender', value)}>
@@ -264,7 +322,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="email">Email *</Label>
                   <Input
@@ -276,7 +334,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone *</Label>
                   <Input
@@ -287,7 +345,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="address">Address</Label>
                   <Input
@@ -317,7 +375,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="emergencyContactPhone">Contact Phone</Label>
                   <Input
@@ -328,7 +386,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="emergencyContactRelationship">Relationship</Label>
                   <Input
@@ -359,7 +417,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="allergies">Allergies</Label>
                   <Textarea
@@ -395,7 +453,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="cancerType">Cancer Type</Label>
                   <Select value={formData.cancerType} onValueChange={(value: string) => handleInputChange('cancerType', value)}>
@@ -412,7 +470,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="stage">Cancer Stage</Label>
                   <Select value={formData.stage} onValueChange={(value: string) => handleInputChange('stage', value)}>
@@ -428,7 +486,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="diagnosisDate">Diagnosis Date</Label>
                   <Input
@@ -460,7 +518,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="smokingStatus">Smoking Status</Label>
                   <Select value={formData.smokingStatus} onValueChange={(value: string) => handleInputChange('smokingStatus', value)}>
@@ -473,7 +531,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="alcoholFrequency">Alcohol Consumption</Label>
                   <Select value={formData.alcoholFrequency} onValueChange={(value: string) => handleInputChange('alcoholFrequency', value)}>
@@ -488,7 +546,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="processedFoodPreference">Processed Food Intake</Label>
                   <Select value={formData.processedFoodPreference} onValueChange={(value: string) => handleInputChange('processedFoodPreference', value)}>
@@ -501,7 +559,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="fruitVegetableIntake">Fruit & Vegetable Intake</Label>
                   <Select value={formData.fruitVegetableIntake} onValueChange={(value: string) => handleInputChange('fruitVegetableIntake', value)}>
@@ -514,7 +572,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="weight">Weight (kg)</Label>
                   <Input
@@ -528,7 +586,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     disabled={isSubmitting}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="height">Height (cm)</Label>
                   <Input
@@ -543,7 +601,7 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                   />
                 </div>
               </div>
-              
+
               {formData.weight && formData.height && (
                 <div className="p-3 bg-muted rounded-lg">
                   <p className="text-sm font-medium">BMI Calculation</p>
@@ -598,22 +656,50 @@ const handleInputChange = (field: string, value: string | number | boolean) => {
                     <h4 className="text-sm font-medium">Uploaded Files</h4>
                     {uploadedFiles.map((file) => (
                       <div key={file.id} className="flex items-center justify-between p-2 border rounded">
-                        <div className="flex items-center space-x-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">{file.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            ({formatFileSize(file.size)})
-                          </span>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeFile(file.id)}
-                          disabled={isSubmitting}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        {/* new */}
+                        {file.preview ? (
+                          <div className="aspect-video bg-muted relative">
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="icon"
+                              className="absolute top-1 right-0 h-6 w-6"
+                              onClick={() => removeFile(file.id)}
+                              disabled={isSubmitting}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                            <img
+                              src={file.preview}
+                              alt={file.name}
+                              className="w-full h-full object-cover"
+                            />
+                            
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white p-2">
+                              <p className="text-xs truncate">{file.name}</p>
+                              <p className="text-xs text-gray-300">{formatFileSize(file.size)}</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-sm">{file.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                ({formatFileSize(file.size)})
+                              </span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeFile(file.id)}
+                              disabled={isSubmitting}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
