@@ -125,11 +125,6 @@ export function LoginForm({ onForgotPassword, onRegister }: LoginFormProps) {
               alt="CliniTrack Logo"
               className="h-10 w-auto logo-no-bg"
             />
-            <ImageWithFallback
-              src={clinitrackText}
-              alt="CliniTrack"
-              className="h-7 w-auto logo-no-bg"
-            />
           </div>
           <div className="text-center">
             <CardTitle>Welcome Back</CardTitle>
