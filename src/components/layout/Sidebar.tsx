@@ -59,13 +59,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             className="h-7 w-auto logo-no-bg"
           />
           <div>
-            <div className="flex items-center">
+            {/* <div className="flex items-center">
               <ImageWithFallback 
                 src={clinitrackText} 
                 alt="CliniTrack" 
                 className="h-5 w-auto logo-no-bg"
               />
-            </div>
+            </div> */}
             <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
           </div>
         </div>
