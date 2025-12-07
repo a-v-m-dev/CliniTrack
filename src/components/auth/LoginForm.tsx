@@ -67,7 +67,7 @@ export function LoginForm({ onForgotPassword, onRegister }: LoginFormProps) {
       try {
         // Try to find user in local PouchDB
         const userDocId = `user_${formData.email}`;
-        const userDoc = await db.get<UserRecord>(userDocId);
+        const userDoc = await db.get(userDocId) as UserRecord;
         
         if (userDoc && userDoc.type === 'user') {
           // Verify password (in production, you should hash passwords!)
@@ -76,7 +76,7 @@ export function LoginForm({ onForgotPassword, onRegister }: LoginFormProps) {
             
             // Simulate login success by calling the auth context with local user data
             // You might need to modify your AuthContext to handle local logins
-            const localLoginResult = await login(formData.email, formData.password, true);
+            const localLoginResult = await login(formData.email, formData.password);
             
             if (localLoginResult.success) {
               console.log('✅ Local authentication completed!');

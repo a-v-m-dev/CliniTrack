@@ -32,7 +32,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     { id: 'dashboard', label: 'Dashboard', icon: Home },
     { id: 'new-patient', label: 'New Patient', icon: UserPlus },
     { id: 'existing-patient', label: 'Existing Patients', icon: Users },
-    { id: 'reports', label: 'Reports', icon: FileBarChart },
+    // { id: 'reports', label: 'Reports', icon: FileBarChart },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'help', label: 'Help & Support', icon: HelpCircle }
   ];
@@ -59,13 +59,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             className="h-7 w-auto logo-no-bg"
           />
           <div>
-            <div className="flex items-center">
+            {/* <div className="flex items-center">
               <ImageWithFallback 
                 src={clinitrackText} 
                 alt="CliniTrack" 
                 className="h-5 w-auto logo-no-bg"
               />
-            </div>
+            </div> */}
             <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
           </div>
         </div>

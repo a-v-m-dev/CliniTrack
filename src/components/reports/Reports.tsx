@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -26,8 +26,26 @@ interface ReportsProps {
 export function Reports({ patients, riskAssessments }: ReportsProps) {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPatientId, setSelectedPatientId] = useState<string>('');
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPatientName, setSelectedPatientName] = useState("");
 
+ useEffect(() => {
+  if (!selectedPatientName) {
+    setSelectedPatientId("");
+    return;
+  }
+
+  const matched = patients.find((p) =>
+    p.name.toLowerCase().includes(selectedPatientName.toLowerCase())
+  );
+
+  if (matched) {
+    setSelectedPatientId(matched.id);
+  } else {
+    setSelectedPatientId("");
+  }
+}, [selectedPatientName, patients]);
+  
   // Only essential report templates
   const reportTemplates = [
     {
@@ -36,7 +54,7 @@ export function Reports({ patients, riskAssessments }: ReportsProps) {
       description: 'Detailed AI risk assessment report for a specific patient',
       icon: User,
       roles: ['doctor'],
-      count: selectedPatientId ? 1 : 0,
+      count: selectedPatientName ? 1 : 0,
       requiresPatientSelection: true
     },
     {
@@ -727,106 +745,95 @@ export function Reports({ patients, riskAssessments }: ReportsProps) {
       <Card>
         <CardHeader>
           <CardTitle>Report Options</CardTitle>
-          <CardDescription>Search reports and select patient for individual assessments</CardDescription>
+          <CardDescription>Search reports and type patient name for individual assessments</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search reports..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            
+            {/* Search Patient */}
             {user?.role === 'doctor' && (
-              <div className="space-y-2">
-                <Label htmlFor="patient-select">Select Patient for Individual Report</Label>
-                <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a patient..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {patients.map(patient => (
-                      <SelectItem key={patient.id} value={patient.id}>
-                        {patient.name} - {patient.age}y {patient.gender}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Type patient name..."
+                  value={selectedPatientName}
+                  onChange={(e) => setSelectedPatientName(e.target.value)}
+                  className="pl-10"
+                />
               </div>
             )}
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {filteredReports.map((report) => {
-          const IconComponent = report.icon;
-          
-          return (
-            <Card key={report.id}>
-              <CardHeader>
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <IconComponent className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">{report.title}</CardTitle>
-                    <CardDescription className="text-sm">
-                      {report.description}
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Records:</span>
-                    <span className="font-medium">{report.count}</span>
-                  </div>
-                  
-                  {report.requiresPatientSelection && (
-                    <div className="text-xs text-muted-foreground">
-                      {selectedPatientId ? 
-                        `Selected: ${patients.find(p => p.id === selectedPatientId)?.name}` : 
-                        'Please select a patient above'
-                      }
-                    </div>
-                  )}
-                  
-                  <Separator />
-                  
-                  <div className="flex space-x-2">
-                    <Button 
-                      size="sm" 
-                      onClick={() => handleDownloadPDF(report.id)}
-                      className="flex-1"
-                      disabled={report.requiresPatientSelection && !selectedPatientId}
-                    >
-                      <Download className="mr-2 h-3 w-3" />
-                      PDF
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => handlePrintPDF(report.id)}
-                      className="flex-1"
-                      disabled={report.requiresPatientSelection && !selectedPatientId}
-                    >
-                      <Printer className="mr-2 h-3 w-3" />
-                      Print
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+  {filteredReports.map((report) => {
+    const IconComponent = report.icon;
+
+    // Find patient by typed name (case-insensitive)
+    const selectedPatient = patients.find((p) =>
+      p.name.toLowerCase().includes(selectedPatientName.toLowerCase())
+    );
+
+    return (
+      <Card key={report.id}>
+        <CardHeader>
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <IconComponent className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-base">{report.title}</CardTitle>
+              <CardDescription className="text-sm">
+                {report.description}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <div className="space-y-4">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Records:</span>
+              <span className="font-medium">{report.count}</span>
+            </div>
+
+            {report.requiresPatientSelection && (
+              <div className="text-xs text-muted-foreground">
+                {selectedPatientName
+                  ? `Selected: ${selectedPatient ? selectedPatient.name : 'No matching patient'}`
+                  : 'Please type a patient name above'}
+              </div>
+            )}
+
+            <Separator />
+
+            <div className="flex space-x-2">
+              <Button
+                size="sm"
+                onClick={() => handleDownloadPDF(report.id)}
+                className="flex-1"
+                disabled={report.requiresPatientSelection && !selectedPatient}
+              >
+                <Download className="mr-2 h-3 w-3" />
+                PDF
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePrintPDF(report.id)}
+                className="flex-1"
+                disabled={report.requiresPatientSelection && !selectedPatient}
+              >
+                <Printer className="mr-2 h-3 w-3" />
+                Print
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  })}
+</div>
 
       <Card>
         <CardHeader>
