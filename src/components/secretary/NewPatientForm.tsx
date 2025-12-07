@@ -122,7 +122,7 @@ export function NewPatientForm({ onPatientCreated }: NewPatientFormProps) {
     setIsSubmitting(true);
 
     // Validation
-    if (!formData.name || !formData.age || !formData.gender || !formData.email || !formData.phone) {
+    if (!formData.name || !formData.age || !formData.gender || !formData.phone) {
       setError('Please fill in all required fields');
       setIsSubmitting(false);
       return;
@@ -324,7 +324,7 @@ export function NewPatientForm({ onPatientCreated }: NewPatientFormProps) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email *</Label>
+                  <Label htmlFor="email">Email (Optional)</Label>
                   <Input
                     id="email"
                     type="email"
