@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PouchDB from 'pouchdb-browser';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -12,6 +12,7 @@ import { Activity, Brain, CheckCircle, AlertTriangle, XCircle, Loader2 } from 'l
 import { Patient, RiskAssessment } from '../../types';
 import { calculateBMI } from '../../data/mockData';
 import { useAuth } from '../../contexts/AuthContext';
+import { Search } from "lucide-react";
 
 interface RiskAssessmentProps {
   patients: Patient[];
@@ -112,9 +113,12 @@ function getUrgencyLevel(score: number, stage?: string): string {
 
 export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: RiskAssessmentProps) {
   const { user: authUser } = useAuth();
+  const { user } = useAuth();
+ 
   const db = new PouchDB('CliniTrack');
   
-  const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPatientName, setSelectedPatientName] = useState("");  
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [newSymptom, setNewSymptom] = useState('');
   const [assessment, setAssessment] = useState<RiskAssessment | null>(null);
@@ -123,7 +127,19 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
   const [overrideRiskLevel, setOverrideRiskLevel] = useState<'Low' | 'Moderate' | 'High'>('Low');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
+    // sync name -> id
+  useEffect(() => {
+    if (!selectedPatientName) {
+      setSelectedPatientId("");
+      return;
+    }
+    const matched = patients.find((p) =>
+      p.name.toLowerCase().includes(selectedPatientName.toLowerCase())
+    );
+    setSelectedPatientId(matched ? matched.id : "");
+  }, [selectedPatientName, patients]);
+
   // NEW: Additional fields for enhanced assessment
   const [patientStage, setPatientStage] = useState<string>('Undetermined');
   const [patientStatus, setPatientStatus] = useState<string>('New');
@@ -363,21 +379,20 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Patient Selection */}
+          {/* Search Patient */}
           <div className="space-y-2">
-            <Label>Select Patient</Label>
-            <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a patient for assessment" />
-              </SelectTrigger>
-              <SelectContent>
-                {patients.map((patient) => (
-                  <SelectItem key={patient.id} value={patient.id}>
-                    {patient.name} - {patient.age} years, {patient.gender}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Search Patient */}
+            {user?.role === 'doctor' && (
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search Patient..."
+                  value={selectedPatientName}
+                  onChange={(e) => setSelectedPatientName(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            )}
           </div>
 
           {selectedPatient && (
