@@ -50,16 +50,38 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
       high: riskAssessments.filter(r => r.riskLevel === 'High').length
     };
 
-    // Common symptoms from risk assessments
-    const symptomCounts: Record<string, number> = {};
+    // FIXED: Extract common risk factors from assessment.factors
+    const factorCounts: Record<string, number> = {};
+    
     riskAssessments.forEach(assessment => {
-      assessment.symptoms.forEach(symptom => {
-        symptomCounts[symptom] = (symptomCounts[symptom] || 0) + 1;
+      assessment.factors.forEach(factor => {
+        // Extract key risk factors from the factor strings
+        if (factor.includes('Age')) {
+          factorCounts['Advanced Age'] = (factorCounts['Advanced Age'] || 0) + 1;
+        }
+        if (factor.includes('Stage IV') || factor.includes('Stage III')) {
+          factorCounts['Advanced Cancer Stage'] = (factorCounts['Advanced Cancer Stage'] || 0) + 1;
+        }
+        if (factor.includes('Multiple symptoms')) {
+          factorCounts['Multiple Symptoms'] = (factorCounts['Multiple Symptoms'] || 0) + 1;
+        }
+        if (factor.includes('cancer history')) {
+          factorCounts['Previous Cancer History'] = (factorCounts['Previous Cancer History'] || 0) + 1;
+        }
+        if (factor.includes('smoker')) {
+          factorCounts['Smoking History'] = (factorCounts['Smoking History'] || 0) + 1;
+        }
+        if (factor.includes('Comorbidities')) {
+          factorCounts['Comorbidities Present'] = (factorCounts['Comorbidities Present'] || 0) + 1;
+        }
+        if (factor.includes('Severe symptoms')) {
+          factorCounts['Severe Symptoms'] = (factorCounts['Severe Symptoms'] || 0) + 1;
+        }
       });
     });
 
-    const commonSymptoms = Object.entries(symptomCounts)
-      .map(([symptom, count]) => ({ symptom, count }))
+    const commonRiskFactors = Object.entries(factorCounts)
+      .map(([factor, count]) => ({ factor, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 
@@ -93,7 +115,7 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
       underObservation,
       deceased,
       riskDistribution,
-      commonSymptoms,
+      commonRiskFactors, // FIXED: Changed from commonSymptoms
       monthlyTrends
     };
   }, [patients, riskAssessments]);
@@ -401,36 +423,36 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
             </Card>
           </div>
 
-          {/* Common Symptoms */}
+          {/* FIXED: Common Risk Factors (instead of Common Symptoms) */}
           <Card>
             <CardHeader>
-              <CardTitle>Most Common Symptoms</CardTitle>
-              <CardDescription>Frequently reported symptoms across all patients</CardDescription>
+              <CardTitle>Most Common Risk Factors</CardTitle>
+              <CardDescription>Frequently identified risk factors across all assessments</CardDescription>
             </CardHeader>
             <CardContent>
-              {analytics.commonSymptoms.length > 0 ? (
+              {analytics.commonRiskFactors.length > 0 ? (
                 <div className="space-y-4">
-                  {analytics.commonSymptoms.map((symptom, index) => (
-                    <div key={symptom.symptom} className="flex items-center justify-between">
+                  {analytics.commonRiskFactors.map((item, index) => (
+                    <div key={item.factor} className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         <span className="text-sm font-medium text-muted-foreground">#{index + 1}</span>
-                        <span className="font-medium">{symptom.symptom}</span>
+                        <span className="font-medium">{item.factor}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <div className="w-24 bg-muted rounded-full h-2">
                           <div 
                             className="bg-primary h-2 rounded-full" 
-                            style={{ width: `${(symptom.count / analytics.commonSymptoms[0].count) * 100}%` }}
+                            style={{ width: `${(item.count / analytics.commonRiskFactors[0].count) * 100}%` }}
                           />
                         </div>
-                        <Badge variant="secondary">{symptom.count}</Badge>
+                        <Badge variant="secondary">{item.count}</Badge>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
-                  No symptom data available yet
+                  No risk factor data available yet
                 </div>
               )}
             </CardContent>
@@ -641,18 +663,18 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
               <CardContent className="p-6 text-center">
                 <TrendingUp className="h-12 w-12 mx-auto text-blue-500 mb-4" />
                 <h3 className="font-medium">Risk Assessment Report</h3>
-                <p className="text-sm text-muted-foreground mt-2">
-                  AI risk assessment data and trends
-                </p>
-                <Button variant="outline" className="mt-4">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download CSV
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
+                <p className="text-sm text-mute-foreground mt-2">
+AI risk assessment data and trends
+</p>
+<Button variant="outline" className="mt-4">
+<Download className="h-4 w-4 mr-2" />
+Download CSV
+</Button>
+</CardContent>
+</Card>
+</div>
+</TabsContent>
+</Tabs>
+</div>
+);
 }
