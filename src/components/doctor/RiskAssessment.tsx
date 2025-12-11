@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-toastify';
 import PouchDB from 'pouchdb-browser';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -13,6 +14,7 @@ import { Patient, RiskAssessment } from '../../types';
 import { calculateBMI } from '../../data/mockData';
 import { useAuth } from '../../contexts/AuthContext';
 import { Search } from "lucide-react";
+
 
 interface RiskAssessmentProps {
   patients: Patient[];
@@ -33,38 +35,38 @@ function calculateNewRiskScore(input: {
   let totalScore = 0;
 
   // 1. Age Score (0-15 points)
-  const ageScore = 
+  const ageScore =
     input.age >= 75 ? 15 :
-    input.age >= 65 ? 12 :
-    input.age >= 55 ? 9 :
-    input.age >= 45 ? 6 :
-    input.age >= 35 ? 3 : 0;
+      input.age >= 65 ? 12 :
+        input.age >= 55 ? 9 :
+          input.age >= 45 ? 6 :
+            input.age >= 35 ? 3 : 0;
   totalScore += ageScore;
 
   // 2. Stage Score (0-25 points)
   const stage = input.stage?.toUpperCase() || 'UNDETERMINED';
-  const stageScore = 
+  const stageScore =
     stage === 'IV' ? 25 :
-    stage === 'III' ? 18 :
-    stage === 'II' ? 10 :
-    stage === 'I' ? 4 : 0;
+      stage === 'III' ? 18 :
+        stage === 'II' ? 10 :
+          stage === 'I' ? 4 : 0;
   totalScore += stageScore;
 
   // 3. Status Score (0-20 points)
-  const statusScore = 
+  const statusScore =
     input.status === 'Deceased' ? 20 :
-    input.status === 'Recurrence' ? 18 :
-    input.status === 'Ongoing Treatment' ? 14 :
-    input.status === 'New' ? 10 : 0;
+      input.status === 'Recurrence' ? 18 :
+        input.status === 'Ongoing Treatment' ? 14 :
+          input.status === 'New' ? 10 : 0;
   totalScore += statusScore;
 
   // 4. Type Score (0-15 points)
   const cancerType = input.cancerType?.toLowerCase() || '';
-  const typeScore = 
+  const typeScore =
     cancerType.includes('lung') || cancerType.includes('pancreatic') ? 15 :
-    cancerType.includes('liver') || cancerType.includes('brain') ? 13 :
-    cancerType.includes('breast') || cancerType.includes('colorectal') ? 10 :
-    cancerType.includes('prostate') || cancerType.includes('thyroid') ? 6 : 8;
+      cancerType.includes('liver') || cancerType.includes('brain') ? 13 :
+        cancerType.includes('breast') || cancerType.includes('colorectal') ? 10 :
+          cancerType.includes('prostate') || cancerType.includes('thyroid') ? 6 : 8;
   totalScore += typeScore;
 
   // 5. Symptom Score (0-15 points)
@@ -75,14 +77,14 @@ function calculateNewRiskScore(input: {
   totalScore += symptomScore;
 
   // 6. Severity Score (0-10 points)
-  const severityScore = input.symptomSeverity 
-    ? Math.round((input.symptomSeverity / 10) * 10) 
+  const severityScore = input.symptomSeverity
+    ? Math.round((input.symptomSeverity / 10) * 10)
     : 5;
   totalScore += severityScore;
 
   // 7. Comorbidity Score (0-10 points)
-  const comorbidityCount = input.comorbidities?.length || 
-                           input.patient?.medicalHistory?.length || 0;
+  const comorbidityCount = input.comorbidities?.length ||
+    input.patient?.medicalHistory?.length || 0;
   const comorbidityScore = Math.min(comorbidityCount * 2, 10);
   totalScore += comorbidityScore;
 
@@ -114,11 +116,11 @@ function getUrgencyLevel(score: number, stage?: string): string {
 export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: RiskAssessmentProps) {
   const { user: authUser } = useAuth();
   const { user } = useAuth();
- 
+
   const db = new PouchDB('CliniTrack');
-  
+
   const [selectedPatientId, setSelectedPatientId] = useState("");
-  const [selectedPatientName, setSelectedPatientName] = useState("");  
+  const [selectedPatientName, setSelectedPatientName] = useState("");
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [newSymptom, setNewSymptom] = useState('');
   const [assessment, setAssessment] = useState<RiskAssessment | null>(null);
@@ -127,18 +129,44 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
   const [overrideRiskLevel, setOverrideRiskLevel] = useState<'Low' | 'Moderate' | 'High'>('Low');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // new
+  const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [justSelected, setJustSelected] = useState(false);
 
-    // sync name -> id
+
+  // sync name -> id
+  // Real-time patient dropdown search
   useEffect(() => {
-    if (!selectedPatientName) {
+    const input = selectedPatientName.trim().toLowerCase();
+
+    if (justSelected) {
+      setJustSelected(false);
+      return;
+    }
+
+    if (input === "") {
+      setFilteredPatients([]);
+      setShowDropdown(false);
       setSelectedPatientId("");
       return;
     }
-    const matched = patients.find((p) =>
-      p.name.toLowerCase().includes(selectedPatientName.toLowerCase())
+
+    // Filter patients by name
+    const matches = patients.filter((p) =>
+      p.name.toLowerCase().includes(input)
     );
-    setSelectedPatientId(matched ? matched.id : "");
+
+    setFilteredPatients(matches);
+    setShowDropdown(true);
+
+    // Auto-select ONLY if exact match
+    const exact = patients.find(
+      (p) => p.name.toLowerCase() === input
+    );
+    setSelectedPatientId(exact ? exact.id : "");
   }, [selectedPatientName, patients]);
+
 
   // NEW: Additional fields for enhanced assessment
   const [patientStage, setPatientStage] = useState<string>('Undetermined');
@@ -149,7 +177,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
   const cancerSymptoms = {
     'Breast Cancer': [
-      'Breast lump', 'Nipple discharge', 'Breast pain', 'Skin dimpling', 
+      'Breast lump', 'Nipple discharge', 'Breast pain', 'Skin dimpling',
       'Breast swelling', 'Nipple changes', 'Breast skin changes'
     ],
     'Lung Cancer': [
@@ -168,7 +196,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
   const allSymptoms = [
     ...cancerSymptoms['Breast Cancer'],
-    ...cancerSymptoms['Lung Cancer'], 
+    ...cancerSymptoms['Lung Cancer'],
     ...cancerSymptoms['Colorectal Cancer'],
     ...cancerSymptoms['General Cancer']
   ].filter((symptom, index, self) => self.indexOf(symptom) === index);
@@ -197,9 +225,9 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
     const breastSymptoms = ['breast lump', 'nipple discharge', 'breast pain'];
     const lungSymptoms = ['persistent cough', 'shortness of breath', 'chest pain', 'coughing blood'];
     const colorectalSymptoms = ['blood in stool', 'abdominal pain', 'change in bowel habits'];
-    
+
     const lowerSymptoms = symptoms.map(s => s.toLowerCase());
-    
+
     if (breastSymptoms.some(s => lowerSymptoms.some(ls => ls.includes(s)))) {
       suspectedTypes.push('Breast Cancer');
     }
@@ -227,7 +255,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
     const riskLevel = getRiskLevelFromScore(riskScore);
     const urgencyLevel = getUrgencyLevel(riskScore, patientStage);
-    
+
     // Build risk factors list
     const factors: string[] = [];
     factors.push(`Risk Score: ${riskScore}/100 (New Formula Applied)`);
@@ -281,11 +309,12 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
       date: new Date().toISOString(),
       createdAt: new Date().toISOString()
     };
-    
+
     setAssessment(newAssessment);
     setIsAnalyzing(false);
   };
 
+  /* new submit with toast */
   const handleSubmit = async () => {
     if (!assessment || !selectedPatient) return;
 
@@ -303,46 +332,60 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
     };
 
     try {
-      await db.put({
-        _id: finalAssessment.id,
-        type: 'riskAssessment',
-        ...finalAssessment
-      });
+      await toast.promise(
+        (async () => {
+          await db.put({
+            _id: finalAssessment.id,
+            type: 'riskAssessment',
+            ...finalAssessment
+          });
 
-      console.log('✅ Risk assessment saved to PouchDB:', finalAssessment.id);
+          console.log('✅ Risk assessment saved to PouchDB:', finalAssessment.id);
 
-      const activityId = `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      await db.put({
-        _id: activityId,
-        type: 'activity',
-        activityType: 'risk_assessment',
-        patientId: selectedPatient.id,
-        patientName: selectedPatient.name,
-        riskLevel: finalAssessment.riskLevel,
-        diagnosis: finalAssessment.suspectedCancerTypes?.join(', ') || 'General Assessment',
-        performedBy: authUser?.name || 'Doctor',
-        timestamp: new Date().toISOString(),
-        details: `Risk assessment completed: ${finalAssessment.riskLevel} risk`
-      });
+          const activityId = `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await db.put({
+            _id: activityId,
+            type: 'activity',
+            activityType: 'risk_assessment',
+            patientId: selectedPatient.id,
+            patientName: selectedPatient.name,
+            riskLevel: finalAssessment.riskLevel,
+            diagnosis: finalAssessment.suspectedCancerTypes?.join(', ') || 'General Assessment',
+            performedBy: authUser?.name || 'Doctor',
+            timestamp: new Date().toISOString(),
+            details: `Risk assessment completed: ${finalAssessment.riskLevel} risk`
+          });
 
-      console.log('✅ Activity logged for risk assessment');
+          console.log('✅ Activity logged for risk assessment');
+
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        })(),
+
+        {
+          pending: "Saving risk assessment...",
+          success: "Risk assessment saved successfully!",
+          error: "Failed to save risk assessment."
+        }
+      )
+
+      // After the save
+      onRiskAssessmentCreate(finalAssessment);
+
+      // Reset form
+      setSelectedPatientId('');
+      setSymptoms([]);
+      setAssessment(null);
+      setDoctorNotes('');
+      setDoctorOverride(false);
+      setPatientStage('Undetermined');
+      setPatientStatus('New');
+      setSymptomSeverity(5);
+
     } catch (err) {
       console.error('Failed to save risk assessment to PouchDB:', err);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    onRiskAssessmentCreate(finalAssessment);
-    
-    // Reset form
-    setSelectedPatientId('');
-    setSymptoms([]);
-    setAssessment(null);
-    setDoctorNotes('');
-    setDoctorOverride(false);
-    setPatientStage('Undetermined');
-    setPatientStatus('New');
-    setSymptomSeverity(5);
     setIsSubmitting(false);
   };
 
@@ -373,32 +416,65 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
             <div>
               <CardTitle>AI Risk Assessment</CardTitle>
               <CardDescription>
-{/*               Using new scoring system: Age + Stage + Status + Type + Symptoms + Severity + Comorbidity */}
+                {/*               Using new scoring system: Age + Stage + Status + Type + Symptoms + Severity + Comorbidity */}
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Search Patient */}
+          {/* new Search Patient */}
           <div className="space-y-2">
-            {/* Search Patient */}
             {user?.role === 'doctor' && (
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+
                 <Input
                   placeholder="Search Patient..."
                   value={selectedPatientName}
                   onChange={(e) => setSelectedPatientName(e.target.value)}
+                  onFocus={() => {
+                    if (filteredPatients.length > 0) setShowDropdown(true);
+                  }}
                   className="pl-10"
                 />
+
+                {/* new DROPDOWN RESULTS */}
+                {showDropdown && (
+                  <div className="dropdown-fixed  mt-1 w-full border rounded-lg shadow-lg max-h-60 overflow-y-auto" >
+
+                    {filteredPatients.length > 0 ? (
+                      filteredPatients.map((p) => (
+                        <div
+                          key={p.id}
+                          onClick={() => {
+                            setJustSelected(true);
+                            setSelectedPatientName(p.name);
+                            setSelectedPatientId(p.id);
+                            setShowDropdown(false);
+                          }}
+                          className="px-3 py-2 hover:bg-yellow-500 cursor-pointer"
+                        >
+                          {p.name}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-gray-500 italic">
+                        No matching patients found
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
               </div>
             )}
           </div>
 
+
           {selectedPatient && (
             <>
               {/* Patient Info */}
-              <div className="bg-muted p-4 rounded-lg space-y-3">
+              <div className="bg-muted p-4 rounded-lg space-y-3 z-40">
                 <h3 className="font-medium">Patient Information</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>Name: {selectedPatient.name}</div>
@@ -406,7 +482,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                   <div>Gender: {selectedPatient.gender}</div>
                   <div>Medical History: {selectedPatient.medicalHistory.join(', ') || 'None'}</div>
                 </div>
-                
+
                 <div className="border-t pt-3">
                   <h4 className="font-medium text-sm mb-2">Risk Factors & Lifestyle</h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -474,7 +550,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
               {/* Symptom Input */}
               <div className="space-y-4">
                 <Label>Symptoms</Label>
-                
+
                 {/* Cancer-Specific Symptoms */}
                 <div className="space-y-4">
                   {Object.entries(cancerSymptoms).map(([cancerType, typeSymptoms]) => (
@@ -505,7 +581,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                     onChange={(e) => setNewSymptom(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addSymptom(newSymptom)}
                   />
-                  <Button 
+                  <Button
                     onClick={() => addSymptom(newSymptom)}
                     disabled={!newSymptom}
                   >
@@ -528,7 +604,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                 )}
 
                 {/* Analyze Button */}
-                <Button 
+                <Button
                   onClick={handleAnalyze}
                   disabled={symptoms.length === 0 || isAnalyzing}
                   className="w-full"
@@ -577,7 +653,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                   </div>
                 </div>
               </Card>
-              
+
               <Card className="p-4">
                 <div className="flex items-center space-x-2">
                   <Activity className="h-5 w-5 text-blue-500" />
@@ -587,7 +663,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                   </div>
                 </div>
               </Card>
-              
+
               <Card className="p-4">
                 <div className="flex items-center space-x-2">
                   <AlertTriangle className="h-5 w-5 text-orange-500" />
@@ -628,9 +704,9 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                 {assessment.suggestedStage && assessment.suggestedStage !== 'Undetermined' && (
                   <Card className="p-4">
                     <h4 className="font-medium mb-2">Suggested Stage</h4>
-                    <Badge 
-                      variant={assessment.suggestedStage.includes('IV') ? 'destructive' : 
-                               assessment.suggestedStage.includes('III') ? 'secondary' : 'default'}
+                    <Badge
+                      variant={assessment.suggestedStage.includes('IV') ? 'destructive' :
+                        assessment.suggestedStage.includes('III') ? 'secondary' : 'default'}
                       className="text-sm"
                     >
                       {assessment.suggestedStage}
@@ -672,13 +748,13 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
             </div>
 
             {/* AI Recommendation */}
-            <Alert className={assessment.urgencyLevel === 'Emergency' ? 'border-red-500' : 
-                             assessment.urgencyLevel === 'Urgent' ? 'border-orange-500' : 
-                             assessment.urgencyLevel === 'Priority' ? 'border-yellow-500' : ''}>
+            <Alert className={assessment.urgencyLevel === 'Emergency' ? 'border-red-500' :
+              assessment.urgencyLevel === 'Urgent' ? 'border-orange-500' :
+                assessment.urgencyLevel === 'Priority' ? 'border-yellow-500' : ''}>
               <Brain className="h-4 w-4" />
               <AlertDescription>
                 <strong>AI Recommendation:</strong> {assessment.recommendation}
-                
+
                 {assessment.recommendedTests && assessment.recommendedTests.length > 0 && (
                   <div className="mt-3">
                     <strong>Recommended Diagnostic Tests:</strong>
@@ -695,7 +771,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
             {/* Doctor's Input */}
             <div className="space-y-4 border-t pt-4">
               <h4 className="font-medium">Clinical Notes</h4>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="doctorNotes">Your Clinical Assessment</Label>
                 <Textarea
@@ -733,7 +809,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label>Clinical Stage Assessment</Label>
                     <Select defaultValue={assessment?.suggestedStage || 'Undetermined'}>
@@ -752,7 +828,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
                 </div>
               )}
 
-              <Button 
+              <Button
                 onClick={handleSubmit}
                 disabled={isSubmitting}
                 className="w-full"

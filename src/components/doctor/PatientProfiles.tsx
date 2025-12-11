@@ -237,7 +237,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                               </div>
                             </div>
 
-                            {latestRisk && (
+                            {latestRisk && latestRisk.recommendation && (
                               <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
                                 <strong>Latest AI Assessment:</strong> {latestRisk.recommendation}
                               </div>
@@ -283,7 +283,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                           <div><strong>Email:</strong> {selectedPatient.email}</div>
                                           <div><strong>Phone:</strong> {selectedPatient.phone}</div>
                                           <div><strong>Address:</strong> {selectedPatient.address}</div>
-                                          {selectedPatient.emergencyContact.name && (
+                                          {selectedPatient.emergencyContact?.name && (
                                             <div>
                                               <strong>Emergency Contact:</strong><br />
                                               {selectedPatient.emergencyContact.name} ({selectedPatient.emergencyContact.relationship})<br />
@@ -301,7 +301,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                           <div>
                                             <strong className="text-sm">Medical History:</strong>
                                             <div className="flex flex-wrap gap-1 mt-1">
-                                              {selectedPatient.medicalHistory.length > 0 ? (
+                                              {selectedPatient.medicalHistory?.length > 0 ? (
                                                 selectedPatient.medicalHistory.map((condition, index) => (
                                                   <Badge key={index} variant="secondary" className="text-xs">{condition}</Badge>
                                                 ))
@@ -314,7 +314,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                           <div>
                                             <strong className="text-sm">Allergies:</strong>
                                             <div className="flex flex-wrap gap-1 mt-1">
-                                              {selectedPatient.allergies.length > 0 ? (
+                                              {selectedPatient.allergies?.length > 0 ? (
                                                 selectedPatient.allergies.map((allergy, index) => (
                                                   <Badge key={index} variant="destructive" className="text-xs">{allergy}</Badge>
                                                 ))
@@ -332,15 +332,18 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                   {latestRisk.riskLevel} Risk ({latestRisk.confidence}% confidence)
                                                 </Badge>
                                               </div>
+                                              {latestRisk.recommendation && (
                                               <p className="text-xs text-muted-foreground mt-1">
                                                 {latestRisk.recommendation}
                                               </p>
+                                              )}
                                             </div>
                                           )}
                                         </CardContent>
                                       </Card>
                                     </div>
 
+                                    {/* Recent Activity */}
                                     <Card>
                                       <CardHeader>
                                         <CardTitle className="text-lg">Recent Activity</CardTitle>
@@ -355,7 +358,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                               </div>
                                               <p className="text-sm text-muted-foreground mt-1">{visit.diagnosis}</p>
                                               <div className="flex flex-wrap gap-1 mt-1">
-                                                {visit.symptoms.map((symptom, index) => (
+                                                {visit.symptoms?.map((symptom, index) => (
                                                   <Badge key={index} variant="outline" className="text-xs">{symptom}</Badge>
                                                 ))}
                                               </div>
@@ -368,7 +371,8 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                         </div>
                                       </CardContent>
                                     </Card>
-                                    {/* new */}
+
+                                    {/* new lab files image */}
                                     <div className='space-y-4'>
                                       <h3 className="font-medium">Lab/Imaging Files ({patientLabFiles.length})</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -444,7 +448,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                             <div>
                                               <strong className="text-sm">Symptoms:</strong>
                                               <div className="flex flex-wrap gap-1 mt-1">
-                                                {visit.symptoms.map((symptom, index) => (
+                                                {visit.symptoms?.map((symptom, index) => (
                                                   <Badge key={index} variant="outline" className="text-xs">{symptom}</Badge>
                                                 ))}
                                               </div>
@@ -480,6 +484,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                     </div>
                                   </TabsContent>
 
+                                  {/* labs */}    
                                   <TabsContent value="labs" className="space-y-4">
                                     <div className="space-y-4">
                                       {getPatientLabResults(selectedPatient.id).map((result) => (
@@ -551,36 +556,45 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                             </div>
                                           </CardHeader>
                                           <CardContent className="space-y-4">
-                                            <div>
-                                              <strong className="text-sm">Analyzed Symptoms:</strong>
-                                              <div className="flex flex-wrap gap-1 mt-1">
-                                                {assessment.symptoms.map((symptom, index) => (
-                                                  <Badge key={index} variant="outline" className="text-xs">{symptom}</Badge>
-                                                ))}
+                                            {/* new fix view patient */}
+                                            {assessment.symptoms && assessment.symptoms.length > 0 && (
+                                              <div>
+                                                <strong className="text-sm">Analyzed Symptoms:</strong>
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                  {assessment.symptoms.map((symptom, index) => (
+                                                    <Badge key={index} variant="outline" className="text-xs">{symptom}</Badge>
+                                                  ))}
+                                                </div>
                                               </div>
-                                            </div>
-
-                                            <div>
-                                              <strong className="text-sm">Risk Factors:</strong>
-                                              <ul className="text-sm mt-1 space-y-1">
-                                                {assessment.factors.map((factor, index) => (
-                                                  <li key={index} className="flex items-center space-x-2">
-                                                    <div className="w-1 h-1 bg-muted-foreground rounded-full"></div>
-                                                    <span>{factor}</span>
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                            </div>
-
-                                            <div>
-                                              <strong className="text-sm">AI Recommendation:</strong>
-                                              <div className="bg-muted p-3 rounded mt-1">
-                                                <p className="text-sm">{assessment.recommendation}</p>
-                                                <p className="text-xs text-muted-foreground mt-2">
-                                                  Confidence: {assessment.confidence}%
-                                                </p>
+                                            )}
+                                            
+                                            {/* new fix view patient */}
+                                            {assessment.factors && assessment.factors.length > 0 && (
+                                              <div>
+                                                <strong className="text-sm">Risk Factors:</strong>
+                                                <ul className="text-sm mt-1 space-y-1">
+                                                  {assessment.factors.map((factor, index) => (
+                                                    <li key={index} className="flex items-center space-x-2">
+                                                      <div className="w-1 h-1 bg-muted-foreground rounded-full"></div>
+                                                      <span>{factor}</span>
+                                                    </li>
+                                                  ))}
+                                                </ul>
                                               </div>
-                                            </div>
+                                            )}
+                                            
+                                            {/* new fix view patient */}
+                                            {assessment.recommendation && (
+                                              <div>
+                                                <strong className="text-sm">AI Recommendation:</strong>
+                                                <div className="bg-muted p-3 rounded mt-1">
+                                                  <p className="text-sm">{assessment.recommendation}</p>
+                                                  <p className="text-xs text-muted-foreground mt-2">
+                                                    Confidence: {assessment.confidence}%
+                                                  </p>
+                                                </div>
+                                              </div>
+                                            )}
 
                                             {assessment.doctorNotes && (
                                               <div>

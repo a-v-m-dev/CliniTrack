@@ -120,9 +120,9 @@
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
+  *, *::before, *::after {
+  border-color: var(--border);
+}
 
   body {
     @apply bg-background text-foreground;
@@ -210,4 +210,12 @@ html {
 
 .dark .logo-no-bg {
   mix-blend-mode: screen;
+}
+
+/* new for drop down */
+.dropdown-fixed {
+  position: absolute !important;
+  z-index: 50!important;
+  background-color: red !important;
+  outline: none !important;
 }

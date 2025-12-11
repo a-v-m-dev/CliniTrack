@@ -18,6 +18,8 @@ import { HelpPage } from './components/help/HelpPage';
 import { Toaster } from './components/ui/sonner';
 // import { mockPatients, mockLabResults, mockVisits, mockRiskAssessments } from './data/mockData';
 import { Patient, LabResult, Visit, RiskAssessment } from './types';
+// new toast
+import { ToastContainer } from "react-toastify"
 
 function AppContent() {
   const { user, isLoading } = useAuth();
@@ -255,6 +257,7 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
+      <ToastContainer position="top-right" autoClose={2000} />
       <AppContent />
     </AuthProvider>
   );
