@@ -342,6 +342,21 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
           console.log('✅ Risk assessment saved to PouchDB:', finalAssessment.id);
 
+          try {
+            const patientDoc = await db.get(selectedPatient.id)
+            await db.put({
+              ...patientDoc,
+              status: patientStatus,
+              stage: patientStage !== 'Undetermined' ? patientStage : patientDoc.stage,
+              lastAssessmentDate: new Date().toISOString(),
+              lastAssessmentRisk: finalAssessment.riskLevel,
+              updatedAt: new Date().toISOString()
+            })
+            console.log('✅ Patient record updated with assessment data');
+          } catch (patientErr) {
+            console.error('Failed to update patient record:', patientErr);
+          }
+
           const activityId = `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           await db.put({
             _id: activityId,

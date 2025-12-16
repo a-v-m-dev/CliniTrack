@@ -1,16 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { eachMonthOfInterval, addMonths } from 'date-fns';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, LineChart, Line, Area, AreaChart 
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, Area, AreaChart
 } from 'recharts';
-import { 
-  Users, TrendingUp, AlertTriangle, Calendar, Download, 
-  FileSpreadsheet, FileText, Bell, Activity 
+import {
+  Users, TrendingUp, AlertTriangle, Calendar, Download,
+  FileSpreadsheet, FileText, Bell, Activity
 } from 'lucide-react';
 import { Patient, RiskAssessment } from '../../types';
 
@@ -19,106 +20,162 @@ interface AnalyticsProps {
   riskAssessments: RiskAssessment[];
 }
 
+type TimeRange = 'today' | '1month' | '3months' | '6months' | '1year';
+
 export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
-  const [selectedTimeRange, setSelectedTimeRange] = useState('6months');
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('6months');
   const [selectedExportFormat, setSelectedExportFormat] = useState('pdf');
+
+  /* new get date */
+function getDateRange(range: TimeRange) {
+  const now = new Date();
+
+  let startDate: Date;
+  let endDate: Date;
+
+  switch (range) {
+    case 'today':
+      startDate = new Date(now);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(now);
+      endDate.setHours(23, 59, 59, 999);
+      break;
+
+    case '1month': // current month
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now);
+      break;
+
+    case '3months':
+      startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      endDate = new Date(now);
+      break;
+
+    case '6months':
+      startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+      endDate = new Date(now);
+      break;
+
+    case '1year':
+      startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+      endDate = new Date(now);
+      break;
+  }
+
+  endDate.setHours(23, 59, 59, 999);
+
+  return { startDate, endDate };
+}
+
+
+
+
+  const { startDate, endDate } = getDateRange(selectedTimeRange);
+
+  const filteredPatients = useMemo(() => {
+    return patients.filter(p => {
+      const created = new Date(p.createdAt);
+      return created >= startDate && created <= endDate;
+    });
+  }, [patients, startDate, endDate]);
+
+  const filteredRiskAssessments = useMemo(() => {
+    return riskAssessments.filter(r => {
+      const assessmentDate = new Date(r.date);
+      return assessmentDate >= startDate && assessmentDate <= endDate;
+    });
+  }, [riskAssessments, startDate, endDate]);
+
 
   // Calculate real analytics from patient data
   const analytics = useMemo(() => {
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // Total patients
-    const totalPatients = patients.length;
+  const totalPatients = filteredPatients.length;
 
-    // New patients this month
-    const newPatientsThisMonth = patients.filter(p => 
-      new Date(p.createdAt) > thirtyDaysAgo
-    ).length;
+  const countPatients = patients.length
 
-    // Status counts
-    const ongoingPatients = patients.filter(p => p.status === 'Ongoing').length;
-    const recurrenceCases = patients.filter(p => p.status === 'Recurrence').length;
-    const cancerFreePatients = patients.filter(p => p.status === 'Cancer-Free').length;
-    const underObservation = patients.filter(p => p.status === 'Under Observation').length;
-    const deceased = patients.filter(p => p.status === 'Deceased').length;
+  const newPatientsThisMonth = filteredPatients.filter(p =>
+    new Date(p.createdAt) > thirtyDaysAgo
+  ).length;
 
-    // Risk distribution from risk assessments
-    const riskDistribution = {
-      low: riskAssessments.filter(r => r.riskLevel === 'Low').length,
-      moderate: riskAssessments.filter(r => r.riskLevel === 'Moderate').length,
-      high: riskAssessments.filter(r => r.riskLevel === 'High').length
-    };
+  const ongoingPatients = patients.filter(p => p.status === 'Ongoing').length;
+  const recurrenceCases = patients.filter(p => p.status === 'Recurrence').length;
+  const cancerFreePatients = patients.filter(p => p.status === 'Cancer-Free').length;
+  const underObservation = patients.filter(p => p.status === 'Under Observation').length;
+  const deceased = patients.filter(p => p.status === 'Deceased').length;
 
-    // FIXED: Extract common risk factors from assessment.factors
-    const factorCounts: Record<string, number> = {};
-    
-    riskAssessments.forEach(assessment => {
-      assessment.factors.forEach(factor => {
-        // Extract key risk factors from the factor strings
-        if (factor.includes('Age')) {
-          factorCounts['Advanced Age'] = (factorCounts['Advanced Age'] || 0) + 1;
-        }
-        if (factor.includes('Stage IV') || factor.includes('Stage III')) {
-          factorCounts['Advanced Cancer Stage'] = (factorCounts['Advanced Cancer Stage'] || 0) + 1;
-        }
-        if (factor.includes('Multiple symptoms')) {
-          factorCounts['Multiple Symptoms'] = (factorCounts['Multiple Symptoms'] || 0) + 1;
-        }
-        if (factor.includes('cancer history')) {
-          factorCounts['Previous Cancer History'] = (factorCounts['Previous Cancer History'] || 0) + 1;
-        }
-        if (factor.includes('smoker')) {
-          factorCounts['Smoking History'] = (factorCounts['Smoking History'] || 0) + 1;
-        }
-        if (factor.includes('Comorbidities')) {
-          factorCounts['Comorbidities Present'] = (factorCounts['Comorbidities Present'] || 0) + 1;
-        }
-        if (factor.includes('Severe symptoms')) {
-          factorCounts['Severe Symptoms'] = (factorCounts['Severe Symptoms'] || 0) + 1;
-        }
-      });
+  const riskDistribution = {
+    low: filteredRiskAssessments.filter(r => r.riskLevel === 'Low').length,
+    moderate: filteredRiskAssessments.filter(r => r.riskLevel === 'Moderate').length,
+    high: filteredRiskAssessments.filter(r => r.riskLevel === 'High').length
+  };
+
+  const factorCounts: Record<string, number> = {};
+
+  filteredRiskAssessments.forEach(assessment => {
+    assessment.factors.forEach(factor => {
+      if (factor.includes('Age')) factorCounts['Advanced Age'] = (factorCounts['Advanced Age'] || 0) + 1;
+      if (factor.includes('Stage IV') || factor.includes('Stage III'))
+        factorCounts['Advanced Cancer Stage'] = (factorCounts['Advanced Cancer Stage'] || 0) + 1;
+      if (factor.includes('Multiple symptoms'))
+        factorCounts['Multiple Symptoms'] = (factorCounts['Multiple Symptoms'] || 0) + 1;
+      if (factor.includes('cancer history'))
+        factorCounts['Previous Cancer History'] = (factorCounts['Previous Cancer History'] || 0) + 1;
+      if (factor.includes('smoker'))
+        factorCounts['Smoking History'] = (factorCounts['Smoking History'] || 0) + 1;
+      if (factor.includes('Comorbidities'))
+        factorCounts['Comorbidities Present'] = (factorCounts['Comorbidities Present'] || 0) + 1;
+      if (factor.includes('Severe symptoms'))
+        factorCounts['Severe Symptoms'] = (factorCounts['Severe Symptoms'] || 0) + 1;
     });
+  });
 
-    const commonRiskFactors = Object.entries(factorCounts)
-      .map(([factor, count]) => ({ factor, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
+  const commonRiskFactors = Object.entries(factorCounts)
+    .map(([factor, count]) => ({ factor, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
 
-    // Monthly trends for the last 6 months
-    const monthlyTrends = [];
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-      
-      const monthName = monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      
-      const monthPatients = patients.filter(p => {
-        const createdDate = new Date(p.createdAt);
-        return createdDate >= monthDate && createdDate < nextMonthDate;
-      });
+  const monthDiff =
+    selectedTimeRange === '1month' ? 1 :
+    selectedTimeRange === '3months' ? 3 :
+    selectedTimeRange === '6months' ? 6 :
+    selectedTimeRange === '1year' ? 12 : 1;
 
-      monthlyTrends.push({
-        month: monthName,
-        ongoing: monthPatients.filter(p => p.status === 'Ongoing').length,
-        recurrence: monthPatients.filter(p => p.status === 'Recurrence').length,
-        cancerFree: monthPatients.filter(p => p.status === 'Cancer-Free').length
-      });
-    }
+  const monthlyTrends = eachMonthOfInterval({
+  start: startDate,
+  end: endDate
+}).map(monthDate => {
+  const nextMonth = addMonths(monthDate, 1);
 
-    return {
-      totalPatients,
-      newPatientsThisMonth,
-      ongoingPatients,
-      recurrenceCases,
-      cancerFreePatients,
-      underObservation,
-      deceased,
-      riskDistribution,
-      commonRiskFactors, // FIXED: Changed from commonSymptoms
-      monthlyTrends
-    };
-  }, [patients, riskAssessments]);
+  const monthPatients = filteredPatients.filter(p => {
+    const d = new Date(p.createdAt);
+    return d >= monthDate && d < nextMonth;
+  });
+
+  return {
+    month: monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+    ongoing: monthPatients.filter(p => p.status === 'Ongoing').length,
+    recurrence: monthPatients.filter(p => p.status === 'Recurrence').length,
+    cancerFree: monthPatients.filter(p => p.status === 'Cancer-Free').length
+  };
+});
+
+  return {
+    totalPatients,
+    countPatients,
+    newPatientsThisMonth,
+    ongoingPatients,
+    recurrenceCases,
+    cancerFreePatients,
+    underObservation,
+    deceased,
+    riskDistribution,
+    commonRiskFactors,
+    monthlyTrends
+  };
+}, [filteredPatients, filteredRiskAssessments, selectedTimeRange, endDate]);
 
   // Age group analysis from real patient data
   const ageGroupData = useMemo(() => {
@@ -131,12 +188,12 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
     ];
 
     return ageGroups.map(ageGroup => {
-      const patientsInGroup = patients.filter(p => 
+      const patientsInGroup = filteredPatients.filter(p =>
         p.age >= ageGroup.min && p.age <= ageGroup.max
       );
 
       const patientIds = patientsInGroup.map(p => p.id);
-      const assessmentsInGroup = riskAssessments.filter(r => 
+      const assessmentsInGroup = filteredRiskAssessments.filter(r =>
         patientIds.includes(r.patientId)
       );
 
@@ -147,53 +204,53 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
         high: assessmentsInGroup.filter(a => a.riskLevel === 'High').length
       };
     });
-  }, [patients, riskAssessments]);
+  }, [filteredPatients, filteredRiskAssessments]);
 
   // Gender distribution from real patient data
   const genderDistribution = useMemo(() => {
-    const male = patients.filter(p => p.gender === 'Male').length;
-    const female = patients.filter(p => p.gender === 'Female').length;
-    const other = patients.filter(p => p.gender === 'Other').length;
-    const total = patients.length || 1;
+    const male = filteredPatients.filter(p => p.gender === 'Male').length;
+    const female = filteredPatients.filter(p => p.gender === 'Female').length;
+    const other = filteredPatients.filter(p => p.gender === 'Other').length;
+    const total = filteredPatients.length || 1;
 
     return {
       male: { count: male, percentage: Math.round((male / total) * 100) },
       female: { count: female, percentage: Math.round((female / total) * 100) },
       other: { count: other, percentage: Math.round((other / total) * 100) }
     };
-  }, [patients]);
+  }, [filteredPatients]);
 
   // Average age by risk level
   const averageAgeByRisk = useMemo(() => {
     const riskLevels: ('Low' | 'Moderate' | 'High')[] = ['Low', 'Moderate', 'High'];
-    
+
     return riskLevels.reduce((acc, level) => {
-      const assessments = riskAssessments.filter(r => r.riskLevel === level);
+      const assessments = filteredRiskAssessments.filter(r => r.riskLevel === level);
       const patientIds = assessments.map(a => a.patientId);
-      const patientsWithRisk = patients.filter(p => patientIds.includes(p.id));
-      
+      const patientsWithRisk = filteredPatients.filter(p => patientIds.includes(p.id));
+
       if (patientsWithRisk.length > 0) {
         const totalAge = patientsWithRisk.reduce((sum, p) => sum + p.age, 0);
         acc[level] = (totalAge / patientsWithRisk.length).toFixed(1);
       } else {
         acc[level] = 'N/A';
       }
-      
+
       return acc;
     }, {} as Record<string, string>);
-  }, [patients, riskAssessments]);
+  }, [filteredPatients, filteredRiskAssessments]);
 
   // High risk patients
   const highRiskPatients = useMemo(() => {
-    const highRiskAssessments = riskAssessments.filter(r => r.riskLevel === 'High');
+    const highRiskAssessments = filteredRiskAssessments.filter(r => r.riskLevel === 'High');
     const highRiskPatientIds = [...new Set(highRiskAssessments.map(r => r.patientId))];
-    return patients.filter(p => highRiskPatientIds.includes(p.id)).slice(0, 5);
-  }, [patients, riskAssessments]);
+    return filteredPatients.filter(p => highRiskPatientIds.includes(p.id)).slice(0, 5);
+  }, [filteredPatients, filteredRiskAssessments]);
 
   // Risk distribution colors
   const riskColors = {
     low: '#22c55e',
-    moderate: '#f59e0b', 
+    moderate: '#f59e0b',
     high: '#ef4444'
   };
 
@@ -204,46 +261,57 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
   ];
 
   // Monthly activity trends
-  const monthlyActivityTrends = useMemo(() => {
-    const now = new Date();
-    const trends = [];
 
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const nextMonthDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-      const monthName = monthDate.toLocaleDateString('en-US', { month: 'short' });
+const monthlyActivityTrends = useMemo(() => {
+  const months = eachMonthOfInterval({
+    start: startDate,
+    end: endDate
+  });
 
-      const newPatients = patients.filter(p => {
-        const createdDate = new Date(p.createdAt);
-        return createdDate >= monthDate && createdDate < nextMonthDate;
-      }).length;
+  return months.map(monthDate => {
+    const nextMonth = addMonths(monthDate, 1);
 
-      const assessments = riskAssessments.filter(r => {
-        const assessmentDate = new Date(r.date);
-        return assessmentDate >= monthDate && assessmentDate < nextMonthDate;
-      }).length;
+    const newPatients = filteredPatients.filter(p => {
+      const d = new Date(p.createdAt);
+      return d >= monthDate && d < nextMonth;
+    }).length;
 
-      const highRisk = riskAssessments.filter(r => {
-        const assessmentDate = new Date(r.date);
-        return assessmentDate >= monthDate && assessmentDate < nextMonthDate && r.riskLevel === 'High';
-      }).length;
+    const assessments = filteredRiskAssessments.filter(r => {
+      const d = new Date(r.date);
+      return d >= monthDate && d < nextMonth;
+    }).length;
 
-      trends.push({
-        month: monthName,
-        newPatients,
-        assessments,
-        highRisk
-      });
-    }
+    const highRisk = filteredRiskAssessments.filter(r => {
+      const d = new Date(r.date);
+      return d >= monthDate && d < nextMonth && r.riskLevel === 'High';
+    }).length;
 
-    return trends;
-  }, [patients, riskAssessments]);
+    return {
+      month: monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      newPatients,
+      assessments,
+      highRisk
+    };
+  });
+}, [filteredPatients, filteredRiskAssessments, startDate, endDate]);
+
 
   const exportReport = (format: string) => {
     const fileName = `clinitrack-analytics-${new Date().toISOString().split('T')[0]}.${format}`;
     console.log(`Generating ${format.toUpperCase()} report: ${fileName}`);
     alert(`${format.toUpperCase()} report would be downloaded as: ${fileName}`);
   };
+
+  // for debug graph
+//   useEffect(() => {
+//   console.log('ALL riskAssessments:', riskAssessments.length);
+//   console.log('FILTERED riskAssessments:', filteredRiskAssessments.length);
+
+//   filteredRiskAssessments.forEach(r => {
+//     console.log('date:', r.date, 'parsed:', new Date(r.date));
+//   });
+// }, [riskAssessments, filteredRiskAssessments]);
+
 
   return (
     <div className="space-y-6">
@@ -252,21 +320,26 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
           <h2 className="text-2xl font-semibold">Analytics Dashboard</h2>
           <p className="text-muted-foreground">Comprehensive patient data insights and trends</p>
         </div>
-        
+
         <div className="flex items-center space-x-4">
-          <Select value={selectedTimeRange} onValueChange={setSelectedTimeRange}>
+          <Select
+  value={selectedTimeRange}
+  onValueChange={(value: TimeRange) => setSelectedTimeRange(value)}
+>
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              {/* <SelectItem value="today">Today</SelectItem> */}
+              <SelectItem value="today">Today</SelectItem>
               <SelectItem value="1month">Last Month</SelectItem>
               <SelectItem value="3months">Last 3 Months</SelectItem>
               <SelectItem value="6months">Last 6 Months</SelectItem>
               <SelectItem value="1year">Last Year</SelectItem>
             </SelectContent>
           </Select>
-          
-          <Select value={selectedExportFormat} onValueChange={setSelectedExportFormat}>
+
+          {/* <Select value={selectedExportFormat} onValueChange={setSelectedExportFormat}>
             <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
@@ -280,7 +353,7 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
           <Button onClick={() => exportReport(selectedExportFormat)}>
             <Download className="h-4 w-4 mr-2" />
             Export
-          </Button>
+          </Button> */}
         </div>
       </div>
 
@@ -291,7 +364,7 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Patients</p>
-                <p className="text-3xl font-bold">{analytics.totalPatients}</p>
+                <p className="text-3xl font-bold">{analytics.countPatients}</p>
               </div>
               <Users className="h-8 w-8 text-blue-500" />
             </div>
@@ -440,8 +513,8 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                       </div>
                       <div className="flex items-center space-x-2">
                         <div className="w-24 bg-muted rounded-full h-2">
-                          <div 
-                            className="bg-primary h-2 rounded-full" 
+                          <div
+                            className="bg-primary h-2 rounded-full"
                             style={{ width: `${(item.count / analytics.commonRiskFactors[0].count) * 100}%` }}
                           />
                         </div>
@@ -559,7 +632,7 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardTitle>Gender Distribution</CardTitle>
               </CardHeader>
               <CardContent>
-                {patients.length > 0 ? (
+                {filteredPatients.length > 0 ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <span>Female</span>
@@ -604,7 +677,7 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <CardTitle>Average Age by Risk Level</CardTitle>
               </CardHeader>
               <CardContent>
-                {riskAssessments.length > 0 ? (
+                {filteredRiskAssessments.length > 0 ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <span>Low Risk</span>
@@ -664,17 +737,17 @@ export function Analytics({ patients, riskAssessments }: AnalyticsProps) {
                 <TrendingUp className="h-12 w-12 mx-auto text-blue-500 mb-4" />
                 <h3 className="font-medium">Risk Assessment Report</h3>
                 <p className="text-sm text-mute-foreground mt-2">
-AI risk assessment data and trends
-</p>
-<Button variant="outline" className="mt-4">
-<Download className="h-4 w-4 mr-2" />
-Download CSV
-</Button>
-</CardContent>
-</Card>
-</div>
-</TabsContent>
-</Tabs>
-</div>
-);
+                  AI risk assessment data and trends
+                </p>
+                <Button variant="outline" className="mt-4">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download CSV
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 }

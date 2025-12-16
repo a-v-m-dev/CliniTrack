@@ -172,7 +172,20 @@ export function NewPatientForm({ onPatientCreated }: NewPatientFormProps) {
         // Save to local PouchDB
         await db.put({
           _id: newPatient.id,
+          type: "patient",
           ...newPatient
+        });
+
+        // new log activity if new patient register
+        await db.put({
+          _id: `activity_patient_${newPatient.id}_${Date.now()}`,
+          type: 'activity',
+          activityType: 'patient_create',
+          patientId: newPatient.id,
+          patientName: newPatient.name,
+          performedBy: 'Secretary',
+          timestamp: new Date().toISOString(),
+          details: 'New patient registered'
         });
 
         console.log('✅ Patient saved locally to PouchDB:', newPatient.name);
@@ -674,7 +687,7 @@ export function NewPatientForm({ onPatientCreated }: NewPatientFormProps) {
                               alt={file.name}
                               className="w-full h-full object-cover"
                             />
-                            
+
                             <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white p-2">
                               <p className="text-xs truncate">{file.name}</p>
                               <p className="text-xs text-gray-300">{formatFileSize(file.size)}</p>

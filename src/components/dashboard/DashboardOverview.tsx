@@ -30,7 +30,7 @@ interface StoredLabResult {
 interface ActivityLog {
   _id: string;
   type: 'activity';
-  activityType: 'patient_edit' | 'lab_upload';
+  activityType: 'patient_edit' | 'lab_upload' | 'patient_create';
   patientId: string;
   patientName: string;
   labType?: string;
@@ -286,9 +286,11 @@ export function DashboardOverview({
                     <div key={activity._id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex-1">
                         <p className="font-medium text-sm">
-                          {activity.activityType === 'patient_edit'
-                            ? `Edited ${activity.patientName}'s profile`
-                            : activity.labFileName || 'Lab file uploaded'}
+                          {activity.activityType === 'patient_create'
+                          ? `Added new patient: ${activity.patientName}`
+                          : activity.activityType === 'patient_edit'
+                          ? `Edited ${activity.patientName}'s profile`
+                          : activity.labFileName || 'Lab file uploaded'}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {activity.patientName} • {formatDate(activity.timestamp)}
