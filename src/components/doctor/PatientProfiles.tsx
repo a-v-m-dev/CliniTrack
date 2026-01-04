@@ -9,6 +9,8 @@ import { Patient, LabResult, Visit, RiskAssessment } from '../../types';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Separator } from '../ui/separator';
 import PouchDB from 'pouchdb-browser';
+import { pdfjs } from "react-pdf"
+
 
 interface PatientProfilesProps {
   patients: Patient[];
@@ -29,13 +31,22 @@ interface StoredLabResult {
   date: string;
   uploadedBy: string;
   labType?: string;
+  results?: string
 }
+
+// new for viewer
+type SelectedFile =
+  | { type: 'image'; src: string }
+  | { type: 'pdf'; src: string }
+  | null;
 
 export function PatientProfiles({ patients, labResults, visits, riskAssessments }: PatientProfilesProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [patientLabFiles, setPatientLabFiles] = useState<StoredLabResult[]>([]);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  // const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFile>(null);
+  const [patientVisits, setPatientVisits] = useState<Visit[]>([]);
   const db = new PouchDB('CliniTrack');
 
   //new
@@ -61,6 +72,21 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
   //new
   const getBase64ImageSrc = (fileData: string, fileType: string) => {
     return `data:${fileType};base64,${fileData}`;
+  };
+
+  // pdf
+  const base64ToPdfBlobUrl = (base64: string) => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'application/pdf' });
+
+    return URL.createObjectURL(blob);
   };
 
   //new
@@ -92,12 +118,45 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
   );
 
   const getPatientLabResults = (patientId: string) => {
-    return labResults.filter(result => result.patientId === patientId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Filter the lab files that were already fetched for the selected patient
+    return patientLabFiles.filter(file => file.patientId === patientId);
   };
 
+  // for visit history
+  // Add this useEffect to fetch visits from PouchDB
+  useEffect(() => {
+    const fetchVisits = async () => {
+      try {
+        const allDocs = await db.allDocs({ include_docs: true });
+        const visitDocs = allDocs.rows
+          .map((row: any) => row.doc)
+          .filter((doc: any) => doc?.type === 'visit') as Visit[];
+
+        setPatientVisits(visitDocs);
+      } catch (err) {
+        console.error('Failed to fetch visits:', err);
+      }
+    };
+
+    fetchVisits();
+
+    // Optional: Listen for changes in real-time
+    const changes = db.changes({
+      since: 'now',
+      live: true,
+      include_docs: true
+    }).on('change', (change: any) => {
+      if (change.doc?.type === 'visit') {
+        fetchVisits();
+      }
+    });
+
+    return () => changes.cancel();
+  }, []);
+
   const getPatientVisits = (patientId: string) => {
-    return visits.filter(visit => visit.patientId === patientId)
+    return patientVisits
+      .filter(visit => visit.patientId === patientId)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
 
@@ -333,9 +392,9 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                 </Badge>
                                               </div>
                                               {latestRisk.recommendation && (
-                                              <p className="text-xs text-muted-foreground mt-1">
-                                                {latestRisk.recommendation}
-                                              </p>
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                  {latestRisk.recommendation}
+                                                </p>
                                               )}
                                             </div>
                                           )}
@@ -375,65 +434,86 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                     {/* new lab files image */}
                                     <div className='space-y-4'>
                                       <h3 className="font-medium">Lab/Imaging Files ({patientLabFiles.length})</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                      {patientLabFiles.map((labFile) => {
-                                        const isImage = labFile.fileType.startsWith('image/');
+                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {patientLabFiles.map((labFile) => {
+                                          const isImage = labFile.fileType.startsWith('image/');
+                                          const isPdf = labFile.fileType === 'application/pdf'
 
-                                        return (
-                                          <Card key={labFile._id} className="overflow-hidden">
-                                            {isImage ? (
-                                              <div
-                                                className="aspect-video bg-muted cursor-pointer relative group"
-                                                onClick={() => setSelectedImage(getBase64ImageSrc(labFile.fileData, labFile.fileType))}
-                                              >
-                                                <img
-                                                  src={getBase64ImageSrc(labFile.fileData, labFile.fileType)}
-                                                  alt={labFile.name}
-                                                  className="w-full h-full object-cover"
-                                                />
-                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                  <ImageIcon className="h-8 w-8 text-white" />
-                                                </div>
-                                              </div>
-                                            ) : (
-                                              <div className="aspect-video bg-muted flex items-center justify-center">
-                                                <FileText className="h-12 w-12 text-muted-foreground" />
-                                              </div>
-                                            )}
+                                          const fileSrc = getBase64ImageSrc(
+                                            labFile.fileData,
+                                            labFile.fileType
+                                          )
 
-                                            <CardContent className="p-3">
-                                              <div className="space-y-2">
-                                                <div>
-                                                  <p className="font-medium text-sm truncate">{labFile.name}</p>
-                                                  <p className="text-xs text-muted-foreground">{formatDate(labFile.date)}</p>
+                                          return (
+                                            <Card key={labFile._id} className="overflow-hidden">
+                                              {/* image */}
+                                              {isImage && (
+                                                <div
+                                                  className="aspect-video bg-muted cursor-pointer relative group"
+                                                  onClick={() =>
+                                                    setSelectedFile({ type: 'image', src: fileSrc })
+                                                  }
+                                                >
+                                                  <img
+                                                    src={fileSrc}
+                                                    alt={labFile.name}
+                                                    className="w-full h-full object-cover"
+                                                  />
+                                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                    <ImageIcon className="h-8 w-8 text-white" />
+                                                  </div>
                                                 </div>
-                                                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                                  <span>{formatFileSize(labFile.fileSize)}</span>
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-6 px-2"
-                                                    onClick={() => handleDeleteLabFile(labFile._id)}
-                                                  >
-                                                    <Trash2 className="h-3 w-3" />
-                                                  </Button>
-                                                </div>
-                                                <p className="text-xs">Uploaded by: {labFile.uploadedBy}</p>
-                                              </div>
-                                            </CardContent>
-                                          </Card>
-                                        );
-                                      })}
+                                              )}
 
-                                      {patientLabFiles.length === 0 && (
-                                        <div className="col-span-full text-center py-8 text-muted-foreground text-sm">
-                                          No lab files uploaded yet
-                                        </div>
-                                      )}
-                                    </div>
+                                              {/* pdf */}
+                                              {isPdf && (
+                                                <div
+                                                  className="aspect-video bg-muted flex items-center justify-center cursor-pointer"
+                                                  onClick={() =>
+                                                    setSelectedFile({
+                                                      type: 'pdf',
+                                                      src: base64ToPdfBlobUrl(labFile.fileData)
+                                                    })
+                                                  }
+                                                >
+                                                  <FileText className="h-12 w-12 text-muted-foreground" />
+                                                </div>
+                                              )}
+
+                                              <CardContent className="p-3">
+                                                <div className="space-y-2">
+                                                  <div>
+                                                    <p className="font-medium text-sm truncate">{labFile.name}</p>
+                                                    <p className="text-xs text-muted-foreground">{formatDate(labFile.date)}</p>
+                                                  </div>
+                                                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                    <span>{formatFileSize(labFile.fileSize)}</span>
+                                                    <Button
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      className="h-6 px-2"
+                                                      onClick={() => handleDeleteLabFile(labFile._id)}
+                                                    >
+                                                      <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                  </div>
+                                                  <p className="text-xs">Uploaded by: {labFile.uploadedBy}</p>
+                                                </div>
+                                              </CardContent>
+                                            </Card>
+                                          );
+                                        })}
+
+                                        {patientLabFiles.length === 0 && (
+                                          <div className="col-span-full text-center py-8 text-muted-foreground text-sm">
+                                            No lab files uploaded yet
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   </TabsContent>
 
+                                  {/* visit history */}
                                   <TabsContent value="visits" className="space-y-4">
                                     <div className="space-y-4">
                                       {getPatientVisits(selectedPatient.id).map((visit) => (
@@ -484,59 +564,123 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                     </div>
                                   </TabsContent>
 
-                                  {/* labs */}    
+                                  {/* labs results */}
                                   <TabsContent value="labs" className="space-y-4">
                                     <div className="space-y-4">
-                                      {getPatientLabResults(selectedPatient.id).map((result) => (
-                                        <Card key={result.id}>
-                                          <CardHeader>
-                                            <div className="flex items-center justify-between">
-                                              <CardTitle className="text-lg">{result.name}</CardTitle>
-                                              <div className="flex items-center space-x-2">
-                                                <Badge variant="outline">{result.type}</Badge>
-                                                <span className="text-sm text-muted-foreground">{formatDate(result.date)}</span>
-                                              </div>
-                                            </div>
-                                          </CardHeader>
-                                          <CardContent>
-                                            <div className="space-y-2">
-                                              <div>
-                                                <strong className="text-sm">Results:</strong>
-                                                <pre className="text-sm mt-1 whitespace-pre-wrap font-mono bg-muted p-2 rounded text-muted-foreground">
-                                                  {result.results}
-                                                </pre>
-                                              </div>
+                                      {getPatientLabResults(selectedPatient.id).map((result) => {
+                                        const isImage = result.fileType.startsWith('image/');
+                                        const isPdf = result.fileType === 'application/pdf';
+                                        const fileSrc = getBase64ImageSrc(result.fileData, result.fileType);
 
-                                              {result.file && (
+                                        return (
+                                          <Card key={result._id}>
+                                            <CardHeader>
+                                              <div className="flex items-center justify-between">
+                                                <CardTitle className="text-lg">{result.name}</CardTitle>
+                                                <div className="flex items-center space-x-2">
+                                                  {result.labType && (
+                                                    <Badge variant="outline">{result.labType}</Badge>
+                                                  )}
+                                                  <span className="text-sm text-muted-foreground">
+                                                    {formatDate(result.date)}
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            </CardHeader>
+                                            <CardContent>
+                                              <div className="space-y-4">
+                                                {/* Results/Notes Section */}
+                                                {result.results && (
+                                                  <div>
+                                                    <strong className="text-sm">Results/Notes:</strong>
+                                                    <pre className="text-sm mt-1 whitespace-pre-wrap font-mono bg-muted p-2 rounded text-muted-foreground">
+                                                      {result.results}
+                                                    </pre>
+                                                  </div>
+                                                )}
+
+                                                {/* File Preview Section */}
                                                 <div>
                                                   <strong className="text-sm">Attached File:</strong>
-                                                  <div className="mt-1">
-                                                    <Button variant="outline" size="sm">
-                                                      <FileText className="h-3 w-3 mr-1" />
-                                                      {result.file.name}
-                                                    </Button>
+                                                  <div className="mt-2">
+                                                    {/* Image Preview */}
+                                                    {isImage && (
+                                                      <div
+                                                        className="relative w-full max-w-md cursor-pointer border rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
+                                                        onClick={() =>
+                                                          setSelectedFile({ type: 'image', src: fileSrc })
+                                                        }
+                                                      >
+                                                        <img
+                                                          src={fileSrc}
+                                                          alt={result.name}
+                                                          className="w-full h-auto object-contain"
+                                                        />
+                                                        <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center">
+                                                          <ImageIcon className="h-8 w-8 text-white opacity-0 hover:opacity-100 transition-opacity" />
+                                                        </div>
+                                                      </div>
+                                                    )}
+
+                                                    {/* PDF Preview */}
+                                                    {isPdf && (
+                                                      <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                          setSelectedFile({
+                                                            type: 'pdf',
+                                                            src: base64ToPdfBlobUrl(result.fileData)
+                                                          })
+                                                        }
+                                                      >
+                                                        <FileText className="h-4 w-4 mr-2" />
+                                                        View PDF: {result.fileName}
+                                                      </Button>
+                                                    )}
+
+                                                    {/* File Details */}
+                                                    <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                                                      <div className="flex items-center justify-between">
+                                                        <span>File: {result.fileName}</span>
+                                                        <span>{formatFileSize(result.fileSize)}</span>
+                                                      </div>
+                                                      <div>Uploaded by: {result.uploadedBy}</div>
+                                                    </div>
                                                   </div>
                                                 </div>
-                                              )}
 
-                                              <p className="text-xs text-muted-foreground">
-                                                Uploaded by {result.uploadedBy}
-                                              </p>
-                                            </div>
-                                          </CardContent>
-                                        </Card>
-                                      ))}
+                                                {/* Delete Button (Optional - for doctor/secretary) */}
+                                                <div className="flex justify-end">
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="text-destructive hover:text-destructive"
+                                                    onClick={() => handleDeleteLabFile(result._id)}
+                                                  >
+                                                    <Trash2 className="h-4 w-4 mr-2" />
+                                                    Delete File
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            </CardContent>
+                                          </Card>
+                                        );
+                                      })}
 
                                       {getPatientLabResults(selectedPatient.id).length === 0 && (
                                         <div className="text-center py-8">
                                           <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
                                           <h3 className="mt-2 font-medium">No lab results</h3>
-                                          <p className="text-muted-foreground">No lab results have been uploaded for this patient.</p>
+                                          <p className="text-muted-foreground">
+                                            No lab results have been uploaded for this patient.
+                                          </p>
                                         </div>
                                       )}
                                     </div>
                                   </TabsContent>
 
+                                  {/* risk */}
                                   <TabsContent value="risk" className="space-y-4">
                                     <div className="space-y-4">
                                       {getPatientRiskAssessments(selectedPatient.id).map((assessment) => (
@@ -567,7 +711,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                 </div>
                                               </div>
                                             )}
-                                            
+
                                             {/* new fix view patient */}
                                             {assessment.factors && assessment.factors.length > 0 && (
                                               <div>
@@ -582,7 +726,7 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
                                                 </ul>
                                               </div>
                                             )}
-                                            
+
                                             {/* new fix view patient */}
                                             {assessment.recommendation && (
                                               <div>
@@ -638,19 +782,31 @@ export function PatientProfiles({ patients, labResults, visits, riskAssessments 
       </Card>
 
       {/* Image Preview Modal */}
-      {selectedImage && (
-        <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
+      {selectedFile && (
+        <Dialog open onOpenChange={() => setSelectedFile(null)}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
-              <DialogTitle>Image Preview</DialogTitle>
+              <DialogTitle className='mb-2'>
+                {selectedFile.type === 'image' ? 'Image Preview' : 'PDF Preview'}
+              </DialogTitle>
             </DialogHeader>
-            <div className="relative">
+
+            {selectedFile.type === 'image' && (
               <img
-                src={selectedImage}
+                src={selectedFile.src}
                 alt="Lab result preview"
-                className="w-full h-auto max-h-[70vh] object-contain"
+                className="w-full max-h-[70vh] object-contain"
               />
-            </div>
+            )}
+
+            {selectedFile?.type === 'pdf' && (
+              <div className="h-[100vh] overflow-auto">
+                <iframe
+                  src={selectedFile.src} style={{ width: "100%", height: "80vh", border: "none" }}
+                />
+
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       )}

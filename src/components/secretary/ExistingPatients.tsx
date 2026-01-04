@@ -12,6 +12,7 @@ import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Separator } from '../ui/separator';
 import { useAuth } from '../../contexts/AuthContext';
+import { pdfjs } from "react-pdf"
 
 interface User {
   _id: string;
@@ -57,6 +58,12 @@ interface ExistingPatientsProps {
   onLabResultAdd: (result: LabResult) => void;
 }
 
+// new for viewer
+type SelectedFile =
+  | { type: 'image'; src: string }
+  | { type: 'pdf'; src: string }
+  | null;
+
 export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabResultAdd }: ExistingPatientsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -71,7 +78,7 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
   const [showLabUpload, setShowLabUpload] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [patientLabFiles, setPatientLabFiles] = useState<StoredLabResult[]>([]);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFile>(null);
 
   const { user: authUser } = useAuth();
   const db = new PouchDB('CliniTrack');
@@ -145,7 +152,7 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
         labFileName,
         performedBy: currentUser?.name || authUser?.name || 'System User',
         timestamp: new Date().toISOString(),
-        details: activityType === 'patient_edit' 
+        details: activityType === 'patient_edit'
           ? `Updated patient information for ${patient.name}`
           : `Uploaded ${labType || 'file'} for ${patient.name}`
       };
@@ -268,9 +275,30 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
     }
   };
 
+  // image
   const getBase64ImageSrc = (fileData: string, fileType: string) => {
     return `data:${fileType};base64,${fileData}`;
   };
+
+  // pdf
+  const base64ToPdfBlobUrl = (base64: string) => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'application/pdf' });
+
+    return URL.createObjectURL(blob);
+  };
+
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.js',
+    import.meta.url
+  ).toString();
 
   return (
     <div className="space-y-6">
@@ -553,16 +581,25 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
                                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {patientLabFiles.map((labFile) => {
                                           const isImage = labFile.fileType.startsWith('image/');
+                                          const isPdf = labFile.fileType === 'application/pdf';
+
+                                          const fileSrc = getBase64ImageSrc(
+                                            labFile.fileData,
+                                            labFile.fileType
+                                          );
 
                                           return (
                                             <Card key={labFile._id} className="overflow-hidden">
-                                              {isImage ? (
+                                              {/* image */}
+                                              {isImage && (
                                                 <div
                                                   className="aspect-video bg-muted cursor-pointer relative group"
-                                                  onClick={() => setSelectedImage(getBase64ImageSrc(labFile.fileData, labFile.fileType))}
+                                                  onClick={() =>
+                                                    setSelectedFile({ type: 'image', src: fileSrc })
+                                                  }
                                                 >
                                                   <img
-                                                    src={getBase64ImageSrc(labFile.fileData, labFile.fileType)}
+                                                    src={fileSrc}
                                                     alt={labFile.name}
                                                     className="w-full h-full object-cover"
                                                   />
@@ -570,8 +607,19 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
                                                     <ImageIcon className="h-8 w-8 text-white" />
                                                   </div>
                                                 </div>
-                                              ) : (
-                                                <div className="aspect-video bg-muted flex items-center justify-center">
+                                              )}
+                                            
+                                              {/* pdf */}
+                                              {isPdf && (
+                                                <div
+                                                  className="aspect-video bg-muted flex items-center justify-center cursor-pointer"
+                                                  onClick={() =>
+                                                    setSelectedFile({
+                                                      type: 'pdf',
+                                                      src: base64ToPdfBlobUrl(labFile.fileData)
+                                                    })
+                                                  }
+                                                >
                                                   <FileText className="h-12 w-12 text-muted-foreground" />
                                                 </div>
                                               )}
@@ -624,19 +672,31 @@ export function ExistingPatients({ patients, labResults, onPatientUpdate, onLabR
       </Card>
 
       {/* Image Preview Modal */}
-      {selectedImage && (
-        <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
+      {selectedFile && (
+        <Dialog open onOpenChange={() => setSelectedFile(null)}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
-              <DialogTitle>Image Preview</DialogTitle>
+              <DialogTitle className='mb-2'>
+                {selectedFile.type === 'image' ? 'Image Preview' : 'PDF Preview'}
+              </DialogTitle>
             </DialogHeader>
-            <div className="relative">
+
+            {selectedFile.type === 'image' && (
               <img
-                src={selectedImage}
+                src={selectedFile.src}
                 alt="Lab result preview"
-                className="w-full h-auto max-h-[70vh] object-contain"
+                className="w-full max-h-[70vh] object-contain"
               />
-            </div>
+            )}
+
+            {selectedFile?.type === 'pdf' && (
+              <div className="h-[100vh] overflow-auto">
+                <iframe
+                  src={selectedFile.src}  style={{ width: "100%", height: "80vh", border: "none" }}
+                />
+
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       )}

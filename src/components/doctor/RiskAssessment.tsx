@@ -357,6 +357,28 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
             console.error('Failed to update patient record:', patientErr);
           }
 
+          const visitId = finalAssessment.visitId;
+          const newVisit = {
+            _id: visitId,
+            type: 'visit',
+            id: visitId,
+            patientId: selectedPatient.id,
+            patientName: selectedPatient.name,
+            date: new Date().toISOString(),
+            doctorName: authUser?.name || 'Doctor',
+            symptoms: symptoms,
+            diagnosis: assessment.suspectedCancerTypes?.join(', ') || 'General Assessment',
+            treatment: doctorNotes || assessment.recommendation || 'Risk assessment completed',
+            notes: doctorNotes || undefined,
+            riskLevel: finalAssessment.riskLevel,
+            riskAssessmentId: finalAssessment.id,
+            stage: patientStage !== 'Undetermined' ? patientStage : undefined,
+            status: patientStatus,
+            createdAt: new Date().toISOString()
+          };
+
+          await db.put(newVisit)
+
           const activityId = `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           await db.put({
             _id: activityId,
@@ -378,7 +400,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
         {
           pending: "Saving risk assessment...",
-          success: "Risk assessment saved successfully!",
+          success: "Risk assessment and visit saved successfully!",
           error: "Failed to save risk assessment."
         }
       )
@@ -388,6 +410,7 @@ export function RiskAssessmentComponent({ patients, onRiskAssessmentCreate }: Ri
 
       // Reset form
       setSelectedPatientId('');
+      setSelectedPatientName('');
       setSymptoms([]);
       setAssessment(null);
       setDoctorNotes('');
