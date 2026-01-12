@@ -9,7 +9,6 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import clinitrackLogo from '../../assets/clinitrackLogo.png';
-import clinitrackText from '../../assets/clinitrackLogo.png';
 
 // Initialize PouchDB database
 const db = new PouchDB('CliniTrack');
